@@ -5,9 +5,17 @@ import { EULA_TEXT, PRIVACY_TEXT } from '@/lib/legal';
 
 const PRICE = 1599;
 const SUPPORT_BOT = process.env.NEXT_PUBLIC_SUPPORT_BOT || 'Sync_Industries_Support_Bot';
+const PDF_URL = '/legal/Sync_Industries_Jarvis_Legal.pdf';
 
 function getTG() {
   return typeof window !== 'undefined' ? window.Telegram?.WebApp : null;
+}
+
+function openExternal(url) {
+  const full = url.startsWith('http') || typeof window === 'undefined' ? url : window.location.origin + url;
+  const tg = getTG();
+  if (tg?.openLink) tg.openLink(full);
+  else if (typeof window !== 'undefined') window.open(full, '_blank');
 }
 
 async function api(path, initData, extra = {}) {
@@ -110,6 +118,8 @@ function Onboarding({ initData, onAccepted }) {
           <h3>{doc === 'eula' ? 'Пользовательское соглашение' : 'Политика конфиденциальности'}</h3>
         </div>
         <div className="doc">{doc === 'eula' ? EULA_TEXT : PRIVACY_TEXT}</div>
+        <button className="btn btn-ghost" onClick={() => openExternal(PDF_URL)}>📑 Открыть оригинал (PDF)</button>
+        <div style={{ height: 8 }} />
         <button className="btn btn-primary" onClick={() => setDoc(null)}>Понятно</button>
       </div>
     );
@@ -255,8 +265,11 @@ function Buy({ initData, onPurchased }) {
   const [buying, setBuying] = useState(false);
   const [purchase, setPurchase] = useState(null);
   const [err, setErr] = useState('');
+  const [agreed, setAgreed] = useState(false);
+  const [doc, setDoc] = useState(null); // null | 'eula' | 'privacy'
 
   const pay = async () => {
+    if (!agreed) return;
     setBuying(true); setErr('');
     try {
       const data = await api('/api/purchase', initData);
@@ -267,12 +280,27 @@ function Buy({ initData, onPurchased }) {
     finally { setBuying(false); }
   };
 
+  if (doc) {
+    return (
+      <div className="fade">
+        <div className="doc-head">
+          <button className="icon-btn" onClick={() => setDoc(null)}>‹</button>
+          <h3>{doc === 'eula' ? 'Публичная оферта (EULA)' : 'Политика конфиденциальности'}</h3>
+        </div>
+        <div className="doc">{doc === 'eula' ? EULA_TEXT : PRIVACY_TEXT}</div>
+        <button className="btn btn-ghost" onClick={() => openExternal(PDF_URL)}>📑 Открыть оригинал (PDF)</button>
+        <div style={{ height: 8 }} />
+        <button className="btn btn-primary" onClick={() => setDoc(null)}>Назад к покупке</button>
+      </div>
+    );
+  }
+
   if (purchase) {
     return (
       <div className="fade">
         <h1 style={{ marginTop: 6 }}>Готово 🎉</h1>
         <p className="hint">Лицензия на Jarvis активирована.</p>
-        <div className="card">
+        <div className="card glow">
           <div className="badge">Оплачено</div>
           <p style={{ marginTop: 12 }}>🔑 Ваш лицензионный ключ:</p>
           <span className="key">{purchase.license_key}</span>
@@ -285,12 +313,13 @@ function Buy({ initData, onPurchased }) {
   return (
     <div className="fade">
       <h1 style={{ marginTop: 6 }}>Оформление 🛒</h1>
-      <div className="hero" style={{ minHeight: '26vh', marginTop: 14 }}>
+      <div className="hero" style={{ minHeight: '24vh', marginTop: 14 }}>
         <div className="brand"><span className="logo">◆</span> Jarvis</div>
         <div className="hero-grow" />
-        <h2 style={{ margin: 0 }}>Jarvis Voice Assistant</h2>
+        <h2 style={{ margin: 0 }}>Jarvis <span className="accent">Voice Assistant</span></h2>
         <p className="sub">Пожизненная лицензия</p>
       </div>
+
       <div className="card">
         <ul className="feat">
           <li><span className="b">✓</span> Полная версия (пожизненный доступ)</li>
@@ -300,9 +329,35 @@ function Buy({ initData, onPurchased }) {
         <div className="divider" />
         <div className="price">{PRICE.toLocaleString('ru-RU')} ₽ <small>единоразово</small></div>
         <p className="hint">Оплата в демонстрационном режиме.</p>
+      </div>
+
+      <div className="section-label">Условия покупки</div>
+      <div className="card glow">
+        <p style={{ marginTop: 0 }}>❗ <b>Важно:</b> это покупка цифрового товара. После ввода и активации ключа <b className="accent">возврат средств невозможен</b> (оферта, п. 3).</p>
+        <div className="card tight" style={{ margin: '8px 0' }}>
+          <div className="row" onClick={() => setDoc('eula')}>
+            <div className="ico">📄</div>
+            <div className="meta"><div className="t">Публичная оферта (EULA)</div><div className="s">Лицензия, оплата, возвраты</div></div>
+            <div className="chev">›</div>
+          </div>
+          <div className="row" onClick={() => setDoc('privacy')}>
+            <div className="ico">🔐</div>
+            <div className="meta"><div className="t">Политика конфиденциальности</div><div className="s">Обработка данных</div></div>
+            <div className="chev">›</div>
+          </div>
+          <div className="row" onClick={() => openExternal(PDF_URL)}>
+            <div className="ico">📑</div>
+            <div className="meta"><div className="t">Полный документ (PDF)</div><div className="s">Оригинал пакета документов</div></div>
+            <div className="chev">↗</div>
+          </div>
+        </div>
+        <div className={`check ${agreed ? 'on' : ''}`} onClick={() => setAgreed(!agreed)}>
+          <div className="box">{agreed ? '✓' : ''}</div>
+          <span className="txt">Я ознакомился(ась) с офертой и Политикой и принимаю их. Понимаю, что после активации ключа возврат средств невозможен.</span>
+        </div>
         {err && <p className="hint" style={{ color: 'var(--danger)' }}>{err}</p>}
-        <div style={{ height: 6 }} />
-        <button className="btn btn-primary" disabled={buying} onClick={pay}>
+        <div style={{ height: 4 }} />
+        <button className="btn btn-primary" disabled={!agreed || buying} onClick={pay}>
           {buying ? 'Обработка платежа…' : `Оплатить ${PRICE.toLocaleString('ru-RU')} ₽`}
         </button>
       </div>
