@@ -75,7 +75,13 @@ export default function Page() {
       <div className="app">
         <div className="center">
           <h1>⚠️ Ошибка</h1>
-          <p className="hint">{errorMsg === 'unauthorized' ? 'Не удалось подтвердить вашу сессию Telegram.' : errorMsg}</p>
+          <p className="hint">
+            {errorMsg === 'server_misconfigured'
+              ? 'Сервер не настроен: на Vercel не задана переменная TELEGRAM_BOT_TOKEN. Добавьте её и сделайте Redeploy.'
+              : errorMsg === 'unauthorized'
+              ? 'Не удалось подтвердить вашу сессию Telegram. Проверьте, что TELEGRAM_BOT_TOKEN на Vercel совпадает с токеном этого бота.'
+              : errorMsg}
+          </p>
           <button className="btn" onClick={() => location.reload()}>Перезагрузить</button>
         </div>
       </div>

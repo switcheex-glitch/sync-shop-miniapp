@@ -15,6 +15,11 @@ export async function POST(req) {
     return NextResponse.json({ error: 'bad_request' }, { status: 400 });
   }
 
+  // Явная диагностика: если на сервере не задан токен — это ошибка конфигурации, а не сессии
+  if (!process.env.TELEGRAM_BOT_TOKEN) {
+    return NextResponse.json({ error: 'server_misconfigured' }, { status: 500 });
+  }
+
   const verified = verifyInitData(body?.initData, process.env.TELEGRAM_BOT_TOKEN);
   if (!verified) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
