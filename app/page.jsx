@@ -366,6 +366,23 @@ function Buy({ initData, onPurchased }) {
 }
 
 function Cabinet({ name, purchases, goBuy }) {
+  const [doc, setDoc] = useState(null); // null | 'eula' | 'privacy'
+
+  if (doc) {
+    return (
+      <div className="fade">
+        <div className="doc-head">
+          <button className="icon-btn" onClick={() => setDoc(null)}>‹</button>
+          <h3>{doc === 'eula' ? 'Публичная оферта (EULA)' : 'Политика конфиденциальности'}</h3>
+        </div>
+        <div className="doc">{doc === 'eula' ? EULA_TEXT : PRIVACY_TEXT}</div>
+        <button className="btn btn-ghost" onClick={() => openExternal(PDF_URL)}>📑 Открыть оригинал (PDF)</button>
+        <div style={{ height: 8 }} />
+        <button className="btn btn-primary" onClick={() => setDoc(null)}>Назад</button>
+      </div>
+    );
+  }
+
   return (
     <div className="fade">
       <h1 style={{ marginTop: 6 }}>Кабинет 🗝️</h1>
@@ -390,6 +407,25 @@ function Cabinet({ name, purchases, goBuy }) {
           </div>
         ))
       )}
+
+      <div className="section-label">Документы</div>
+      <div className="card tight">
+        <div className="row" onClick={() => setDoc('eula')}>
+          <div className="ico">📄</div>
+          <div className="meta"><div className="t">Публичная оферта (EULA)</div><div className="s">Лицензия, оплата, возвраты</div></div>
+          <div className="chev">›</div>
+        </div>
+        <div className="row" onClick={() => setDoc('privacy')}>
+          <div className="ico">🔐</div>
+          <div className="meta"><div className="t">Политика конфиденциальности</div><div className="s">Обработка данных</div></div>
+          <div className="chev">›</div>
+        </div>
+        <div className="row" onClick={() => openExternal(PDF_URL)}>
+          <div className="ico">📑</div>
+          <div className="meta"><div className="t">Полный документ (PDF)</div><div className="s">Оригинал пакета документов</div></div>
+          <div className="chev">↗</div>
+        </div>
+      </div>
     </div>
   );
 }
