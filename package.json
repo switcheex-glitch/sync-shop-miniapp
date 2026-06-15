@@ -1,0 +1,18 @@
+{
+  "name": "sync-shop-miniapp",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Sync Industries — Telegram Mini App магазин (Next.js + Supabase)",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.43.4",
+    "next": "^14.2.35",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  }
+}
