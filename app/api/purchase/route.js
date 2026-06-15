@@ -6,7 +6,7 @@ import { DOC_VERSION } from '@/lib/legal';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const PRICE = 1599;
+const PRICE = 4999;
 const SOFTWARE_NAME = 'Jarvis Voice Assistant';
 
 // Генерация лицензионного ключа JARVIS-XXXX-XXXX-XXXX

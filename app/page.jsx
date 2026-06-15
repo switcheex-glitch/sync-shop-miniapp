@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { EULA_TEXT, PRIVACY_TEXT } from '@/lib/legal';
 
-const PRICE = 1599;
+const PRICE = 4999;
 const SUPPORT_BOT = process.env.NEXT_PUBLIC_SUPPORT_BOT || 'Sync_Industries_Support_Bot';
 const PDF_URL = '/legal/Sync_Industries_Jarvis_Legal.pdf';
 
