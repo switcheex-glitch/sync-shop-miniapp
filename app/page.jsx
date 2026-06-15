@@ -121,7 +121,7 @@ function Onboarding({ initData, onAccepted }) {
         <div className="hero">
           <div className="brand"><span className="logo">◆</span> Sync Industries</div>
           <div className="hero-grow" />
-          <h1>Твой ПК 💻<br />слушает тебя 🎙️</h1>
+          <h1>Твой ПК 💻<br /><span className="accent">слушает тебя</span> 🎙️</h1>
           <p className="sub">Голосовой ассистент <b>Jarvis</b> открывает приложения, пишет код, ищет в сети и автоматизирует рутину — одной фразой.</p>
         </div>
         <div style={{ flex: 1, minHeight: 18 }} />
@@ -134,7 +134,7 @@ function Onboarding({ initData, onAccepted }) {
   return (
     <div className="screen fade">
       <div className="brand" style={{ marginBottom: 18 }}><span className="logo">◆</span> Sync Industries</div>
-      <h1>Прежде чем<br />продолжить 📄</h1>
+      <h1>Прежде чем<br /><span className="accent">продолжить</span> 📄</h1>
       <p className="hint" style={{ marginTop: 12 }}>Ознакомьтесь и примите наши документы. Без этого доступ в магазин закрыт.</p>
 
       <div className="card tight" style={{ marginTop: 18 }}>
@@ -213,7 +213,7 @@ function Home({ name, purchases, goBuy }) {
       <div className="hero" style={{ minHeight: '34vh', marginTop: 16 }}>
         <span className="badge">Хит продаж</span>
         <div className="hero-grow" />
-        <h1 style={{ fontSize: 30 }}>Jarvis 🎙️<br />Voice Assistant</h1>
+        <h1 style={{ fontSize: 30 }}>Jarvis 🎙️<br /><span className="accent">Voice Assistant</span></h1>
         <p className="sub">Пожизненная лицензия + премиальные утилиты для Windows.</p>
       </div>
 
