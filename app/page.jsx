@@ -42,16 +42,36 @@ export default function Page() {
   }, []);
 
   useEffect(() => {
-    const tg = getTG();
-    if (tg) {
-      tg.ready();
-      tg.expand();
-      try { tg.setHeaderColor('#08080a'); tg.setBackgroundColor('#08080a'); } catch (_) {}
-    }
-    const id = tg?.initData;
-    if (!id) { setStatus('no-telegram'); return; }
-    setInitData(id);
-    loadSession(id).catch((e) => { setErrorMsg(e.message); setStatus('error'); });
+    let cancelled = false;
+    let attempts = 0;
+    const maxAttempts = 50; // ~5 секунд ожидания готовности Telegram (скрипт может грузиться медленно на телефоне)
+
+    const tick = () => {
+      if (cancelled) return;
+      const tg = getTG();
+      if (tg) {
+        try {
+          tg.ready();
+          tg.expand();
+          tg.setHeaderColor('#08080a');
+          tg.setBackgroundColor('#08080a');
+        } catch (_) {}
+        const id = tg.initData;
+        if (id) {
+          setInitData(id);
+          loadSession(id).catch((e) => { setErrorMsg(e.message); setStatus('error'); });
+          return;
+        }
+      }
+      if (attempts++ >= maxAttempts) {
+        setStatus('no-telegram');
+        return;
+      }
+      setTimeout(tick, 100);
+    };
+
+    tick();
+    return () => { cancelled = true; };
   }, [loadSession]);
 
   if (status === 'loading') {
