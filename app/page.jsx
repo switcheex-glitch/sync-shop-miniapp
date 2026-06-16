@@ -18,11 +18,27 @@ function openExternal(url) {
   else if (typeof window !== 'undefined') window.open(full, '_blank');
 }
 
-async function api(path, initData, extra = {}) {
+// Постоянный гостевой id для открытия вне Telegram (по прямой ссылке Vercel).
+// Отрицательный — чтобы не пересекаться с настоящими Telegram-id.
+function getGuestId() {
+  try {
+    let g = localStorage.getItem('sync_guest_id');
+    if (!g) {
+      g = String(-Math.floor(100000000 + Math.random() * 899999999));
+      localStorage.setItem('sync_guest_id', g);
+    }
+    return g;
+  } catch (_) {
+    return String(-Math.floor(100000000 + Math.random() * 899999999));
+  }
+}
+
+// auth — объект { initData } (Telegram) ИЛИ { guestId, guestName } (гость)
+async function api(path, auth, extra = {}) {
   const res = await fetch(path, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ initData, ...extra })
+    body: JSON.stringify({ ...auth, ...extra })
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
@@ -32,19 +48,24 @@ async function api(path, initData, extra = {}) {
 export default function Page() {
   const [status, setStatus] = useState('loading');
   const [errorMsg, setErrorMsg] = useState('');
-  const [initData, setInitData] = useState('');
+  const [auth, setAuth] = useState(null);
   const [session, setSession] = useState(null);
 
-  const loadSession = useCallback(async (id) => {
-    const data = await api('/api/session', id);
+  const loadSession = useCallback(async (a) => {
+    const data = await api('/api/session', a);
     setSession(data);
     setStatus('ready');
   }, []);
 
+  const startWith = useCallback((a) => {
+    setAuth(a);
+    loadSession(a).catch((e) => { setErrorMsg(e.message); setStatus('error'); });
+  }, [loadSession]);
+
   useEffect(() => {
     let cancelled = false;
     let attempts = 0;
-    const maxAttempts = 50; // ~5 секунд ожидания готовности Telegram (скрипт может грузиться медленно на телефоне)
+    const maxAttempts = 18; // ~1.8 с ждём Telegram; не дождались — открываем как гость
 
     const tick = () => {
       if (cancelled) return;
@@ -56,15 +77,14 @@ export default function Page() {
           tg.setHeaderColor('#08080a');
           tg.setBackgroundColor('#08080a');
         } catch (_) {}
-        const id = tg.initData;
-        if (id) {
-          setInitData(id);
-          loadSession(id).catch((e) => { setErrorMsg(e.message); setStatus('error'); });
+        if (tg.initData) {
+          startWith({ initData: tg.initData });
           return;
         }
       }
       if (attempts++ >= maxAttempts) {
-        setStatus('no-telegram');
+        // Вне Telegram или initData недоступен — гостевой режим (работает по прямой ссылке)
+        startWith({ guestId: getGuestId(), guestName: 'Гость' });
         return;
       }
       setTimeout(tick, 100);
@@ -72,22 +92,10 @@ export default function Page() {
 
     tick();
     return () => { cancelled = true; };
-  }, [loadSession]);
+  }, [startWith]);
 
   if (status === 'loading') {
     return <div className="screen"><div className="center"><div className="spinner" /><p className="hint">Загрузка…</p></div></div>;
-  }
-
-  if (status === 'no-telegram') {
-    return (
-      <div className="screen"><div className="center">
-        <div className="brand"><span className="logo">◆</span> Sync Industries</div>
-        <h2 style={{ marginTop: 12 }}>Открываем магазин…</h2>
-        <p className="hint">Если магазин не загрузился — нажмите кнопку ниже или переоткройте приложение через кнопку «Магазин» у бота.</p>
-        <div style={{ height: 8 }} />
-        <button className="btn btn-primary" style={{ maxWidth: 220 }} onClick={() => location.reload()}>Перезагрузить</button>
-      </div></div>
-    );
   }
 
   if (status === 'error') {
@@ -95,27 +103,21 @@ export default function Page() {
       <div className="screen"><div className="center">
         <div style={{ fontSize: 40 }}>⚠️</div>
         <h2>Ошибка</h2>
-        <p className="hint">
-          {errorMsg === 'server_misconfigured'
-            ? 'Сервер не настроен (TELEGRAM_BOT_TOKEN). Сообщите администратору.'
-            : errorMsg === 'unauthorized'
-            ? 'Не удалось подтвердить сессию Telegram.'
-            : errorMsg}
-        </p>
+        <p className="hint">{errorMsg === 'unauthorized' ? 'Не удалось открыть магазин. Попробуйте перезагрузить.' : errorMsg}</p>
         <button className="btn btn-primary" style={{ maxWidth: 220 }} onClick={() => location.reload()}>Перезагрузить</button>
       </div></div>
     );
   }
 
   if (!session.hasConsent) {
-    return <Onboarding initData={initData} onAccepted={() => loadSession(initData)} />;
+    return <Onboarding auth={auth} onAccepted={() => loadSession(auth)} />;
   }
 
-  return <Shop initData={initData} session={session} reload={() => loadSession(initData)} />;
+  return <Shop auth={auth} session={session} reload={() => loadSession(auth)} />;
 }
 
 /* ===================== ОНБОРДИНГ + СОГЛАСИЕ ===================== */
-function Onboarding({ initData, onAccepted }) {
+function Onboarding({ auth, onAccepted }) {
   const [step, setStep] = useState('welcome'); // welcome | consent
   const [doc, setDoc] = useState(null); // null | 'eula' | 'privacy'
   const [eula, setEula] = useState(false);
@@ -126,7 +128,7 @@ function Onboarding({ initData, onAccepted }) {
   const accept = async () => {
     setSubmitting(true); setErr('');
     try {
-      await api('/api/consent', initData, { acceptedEula: eula, acceptedPrivacy: privacy });
+      await api('/api/consent', auth, { acceptedEula: eula, acceptedPrivacy: privacy });
       getTG()?.HapticFeedback?.notificationOccurred?.('success');
       onAccepted();
     } catch (e) { setErr('Не удалось сохранить согласие. Попробуйте ещё раз.'); setSubmitting(false); }
@@ -202,7 +204,7 @@ function Onboarding({ initData, onAccepted }) {
 }
 
 /* ===================== ВИТРИНА ===================== */
-function Shop({ initData, session, reload }) {
+function Shop({ auth, session, reload }) {
   const [tab, setTab] = useState('home');
   const name = session.user.first_name || 'друг';
   const initial = (name[0] || 'S').toUpperCase();
@@ -215,7 +217,7 @@ function Shop({ initData, session, reload }) {
       </div>
 
       {tab === 'home' && <Home name={name} purchases={session.purchases} goBuy={() => setTab('buy')} />}
-      {tab === 'buy' && <Buy initData={initData} onPurchased={reload} />}
+      {tab === 'buy' && <Buy auth={auth} onPurchased={reload} />}
       {tab === 'cabinet' && <Cabinet name={name} purchases={session.purchases} goBuy={() => setTab('buy')} />}
       {tab === 'support' && <Support />}
 
@@ -283,7 +285,7 @@ function Home({ name, purchases, goBuy }) {
   );
 }
 
-function Buy({ initData, onPurchased }) {
+function Buy({ auth, onPurchased }) {
   const [buying, setBuying] = useState(false);
   const [purchase, setPurchase] = useState(null);
   const [err, setErr] = useState('');
@@ -294,7 +296,7 @@ function Buy({ initData, onPurchased }) {
     if (!agreed) return;
     setBuying(true); setErr('');
     try {
-      const data = await api('/api/purchase', initData);
+      const data = await api('/api/purchase', auth);
       setPurchase(data.purchase);
       getTG()?.HapticFeedback?.notificationOccurred?.('success');
       onPurchased();

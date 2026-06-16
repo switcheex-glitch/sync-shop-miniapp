@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { verifyInitData } from '@/lib/verifyInitData';
+import { resolveUser } from '@/lib/resolveUser';
 import { getSupabase } from '@/lib/supabaseServer';
 import { DOC_VERSION } from '@/lib/legal';
 
@@ -27,12 +27,11 @@ export async function POST(req) {
     return NextResponse.json({ error: 'bad_request' }, { status: 400 });
   }
 
-  const verified = verifyInitData(body?.initData, process.env.TELEGRAM_BOT_TOKEN);
-  if (!verified) {
+  const user = resolveUser(body);
+  if (!user) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
 
-  const user = verified.user;
   const supabase = getSupabase();
 
   // Покупка разрешена только при наличии актуального согласия с документами
