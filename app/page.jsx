@@ -82,8 +82,10 @@ export default function Page() {
     return (
       <div className="screen"><div className="center">
         <div className="brand"><span className="logo">◆</span> Sync Industries</div>
-        <h2 style={{ marginTop: 12 }}>Откройте внутри Telegram</h2>
-        <p className="hint">Магазин работает только как Mini App.<br />Запустите его через @Sync_Industries_Shop_bot.</p>
+        <h2 style={{ marginTop: 12 }}>Открываем магазин…</h2>
+        <p className="hint">Если магазин не загрузился — нажмите кнопку ниже или переоткройте приложение через кнопку «Магазин» у бота.</p>
+        <div style={{ height: 8 }} />
+        <button className="btn btn-primary" style={{ maxWidth: 220 }} onClick={() => location.reload()}>Перезагрузить</button>
       </div></div>
     );
   }
