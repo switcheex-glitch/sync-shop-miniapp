@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { resolveUser } from '@/lib/resolveUser';
 import { getSupabase } from '@/lib/supabaseServer';
+import { confirmPurchase } from '@/lib/fulfill';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -28,7 +29,7 @@ export async function POST(req) {
   const supabase = getSupabase();
   const { data: purchase } = await supabase
     .from('purchases')
-    .select('id, user_id, status, license_key, payment_method, amount, price')
+    .select('*')
     .eq('id', purchaseId)
     .maybeSingle();
 
@@ -36,9 +37,10 @@ export async function POST(req) {
     return NextResponse.json({ error: 'not_found' }, { status: 404 });
   }
 
-  const paid = purchase.status === 'paid';
+  // Активная перепроверка статуса в Platega: подтверждаем оплату даже без вебхука.
+  const result = await confirmPurchase(purchase);
   return NextResponse.json({
-    status: purchase.status,
-    license_key: paid ? purchase.license_key : null
+    status: result.status,
+    license_key: result.license_key
   });
 }
