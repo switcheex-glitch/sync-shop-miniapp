@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { EULA_TEXT, PRIVACY_TEXT } from '@/lib/legal';
 
 const PRICE = 4999;
@@ -238,7 +238,7 @@ function Shop({ auth, session, reload }) {
 }
 
 function Home({ name, purchases, goBuy }) {
-  const owned = purchases && purchases.length > 0;
+  const owned = purchases && purchases.some((p) => p.status === 'paid');
   return (
     <div className="fade">
       <h1 style={{ marginTop: 6 }}>Привет, {name} 👋</h1>
@@ -285,23 +285,81 @@ function Home({ name, purchases, goBuy }) {
   );
 }
 
+const PAY_METHODS = [
+  { k: 'sbp', g: '🏦', t: 'СБП (QR-код)', s: 'Оплата по QR через банк' },
+  { k: 'crypto', g: '₿', t: 'Криптовалюта', s: 'USDT и другие монеты' }
+];
+
 function Buy({ auth, onPurchased }) {
+  const [phase, setPhase] = useState('select'); // select | waiting | done
+  const [method, setMethod] = useState('sbp');
   const [buying, setBuying] = useState(false);
-  const [purchase, setPurchase] = useState(null);
   const [err, setErr] = useState('');
   const [agreed, setAgreed] = useState(false);
   const [doc, setDoc] = useState(null); // null | 'eula' | 'privacy'
+
+  const [purchaseId, setPurchaseId] = useState(null);
+  const [redirect, setRedirect] = useState(null);
+  const [licenseKey, setLicenseKey] = useState(null);
+  const [checking, setChecking] = useState(false);
+
+  const pollRef = useRef(null);
+
+  // Один опрос статуса оплаты. Возвращает true, если оплата подтверждена.
+  const checkOnce = useCallback(async (pid) => {
+    try {
+      const data = await api('/api/payment-status', auth, { purchaseId: pid });
+      if (data.status === 'paid') {
+        setLicenseKey(data.license_key);
+        setPhase('done');
+        getTG()?.HapticFeedback?.notificationOccurred?.('success');
+        onPurchased();
+        return true;
+      }
+      if (data.status === 'canceled' || data.status === 'chargeback') {
+        setErr('Платёж отменён. Попробуйте ещё раз.');
+        setPhase('select');
+        return true; // останавливаем опрос
+      }
+    } catch (_) {}
+    return false;
+  }, [auth, onPurchased]);
+
+  // Авто-опрос статуса, пока ждём оплату (каждые 3 c, до ~5 минут).
+  useEffect(() => {
+    if (phase !== 'waiting' || !purchaseId) return;
+    let attempts = 0;
+    pollRef.current = setInterval(async () => {
+      attempts += 1;
+      const done = await checkOnce(purchaseId);
+      if (done || attempts >= 100) clearInterval(pollRef.current);
+    }, 3000);
+    return () => clearInterval(pollRef.current);
+  }, [phase, purchaseId, checkOnce]);
 
   const pay = async () => {
     if (!agreed) return;
     setBuying(true); setErr('');
     try {
-      const data = await api('/api/purchase', auth);
-      setPurchase(data.purchase);
-      getTG()?.HapticFeedback?.notificationOccurred?.('success');
-      onPurchased();
-    } catch (e) { setErr('Не удалось оформить покупку. Попробуйте позже.'); }
-    finally { setBuying(false); }
+      const data = await api('/api/purchase', auth, { method });
+      if (!data.redirect) throw new Error('no_redirect');
+      setPurchaseId(data.purchaseId);
+      setRedirect(data.redirect);
+      setPhase('waiting');
+      openExternal(data.redirect);
+    } catch (e) {
+      setErr('Не удалось создать платёж. Попробуйте позже.');
+    } finally {
+      setBuying(false);
+    }
+  };
+
+  const manualCheck = async () => {
+    if (!purchaseId) return;
+    setChecking(true);
+    const done = await checkOnce(purchaseId);
+    setChecking(false);
+    if (!done) getTG()?.HapticFeedback?.notificationOccurred?.('warning');
   };
 
   if (doc) {
@@ -319,21 +377,43 @@ function Buy({ auth, onPurchased }) {
     );
   }
 
-  if (purchase) {
+  if (phase === 'done') {
     return (
       <div className="fade">
         <h1 style={{ marginTop: 6 }}>Готово 🎉</h1>
-        <p className="hint">Лицензия на Jarvis активирована.</p>
+        <p className="hint">Оплата получена, лицензия на Jarvis активирована.</p>
         <div className="card glow">
           <div className="badge">Оплачено</div>
           <p style={{ marginTop: 12 }}>🔑 Ваш лицензионный ключ:</p>
-          <span className="key">{purchase.license_key}</span>
+          <span className="key">{licenseKey}</span>
           <p className="hint" style={{ marginTop: 12 }}>Ключ сохранён в разделе «Кабинет». Инструкция по установке — на «Главной».</p>
         </div>
       </div>
     );
   }
 
+  if (phase === 'waiting') {
+    return (
+      <div className="fade">
+        <h1 style={{ marginTop: 6 }}>Ждём оплату ⏳</h1>
+        <div className="card" style={{ textAlign: 'center', padding: 26 }}>
+          <div className="spinner" style={{ margin: '0 auto 14px' }} />
+          <p>Откройте платёжную форму и завершите оплату.</p>
+          <p className="hint">Как только платёж пройдёт, ключ появится здесь автоматически.</p>
+          <div style={{ height: 14 }} />
+          <button className="btn btn-primary" onClick={() => redirect && openExternal(redirect)}>Открыть оплату</button>
+          <div style={{ height: 8 }} />
+          <button className="btn btn-ghost" disabled={checking} onClick={manualCheck}>
+            {checking ? 'Проверяем…' : 'Я оплатил — проверить'}
+          </button>
+        </div>
+        {err && <p className="hint" style={{ color: 'var(--danger)' }}>{err}</p>}
+        <button className="btn btn-ghost" onClick={() => { clearInterval(pollRef.current); setPhase('select'); }}>Отмена</button>
+      </div>
+    );
+  }
+
+  // phase === 'select'
   return (
     <div className="fade">
       <h1 style={{ marginTop: 6 }}>Оформление 🛒</h1>
@@ -352,7 +432,17 @@ function Buy({ auth, onPurchased }) {
         </ul>
         <div className="divider" />
         <div className="price">{PRICE.toLocaleString('ru-RU')} ₽ <small>единоразово</small></div>
-        <p className="hint">Оплата в демонстрационном режиме.</p>
+      </div>
+
+      <div className="section-label">Способ оплаты</div>
+      <div className="card tight">
+        {PAY_METHODS.map((m) => (
+          <div key={m.k} className={`row ${method === m.k ? 'on' : ''}`} onClick={() => setMethod(m.k)}>
+            <div className="ico">{m.g}</div>
+            <div className="meta"><div className="t">{m.t}</div><div className="s">{m.s}</div></div>
+            <div className="box" style={{ borderRadius: '50%' }}>{method === m.k ? '✓' : ''}</div>
+          </div>
+        ))}
       </div>
 
       <div className="section-label">Условия покупки</div>
@@ -382,7 +472,7 @@ function Buy({ auth, onPurchased }) {
         {err && <p className="hint" style={{ color: 'var(--danger)' }}>{err}</p>}
         <div style={{ height: 4 }} />
         <button className="btn btn-primary" disabled={!agreed || buying} onClick={pay}>
-          {buying ? 'Обработка платежа…' : `Оплатить ${PRICE.toLocaleString('ru-RU')} ₽`}
+          {buying ? 'Создаём платёж…' : `Оплатить ${PRICE.toLocaleString('ru-RU')} ₽`}
         </button>
       </div>
     </div>
@@ -407,11 +497,14 @@ function Cabinet({ name, purchases, goBuy }) {
     );
   }
 
+  const paid = (purchases || []).filter((p) => p.status === 'paid');
+  const pending = (purchases || []).filter((p) => p.status === 'pending');
+
   return (
     <div className="fade">
       <h1 style={{ marginTop: 6 }}>Кабинет 🗝️</h1>
       <p className="hint">Ваши лицензии и ключи активации.</p>
-      {(!purchases || purchases.length === 0) ? (
+      {paid.length === 0 && pending.length === 0 ? (
         <div className="card" style={{ textAlign: 'center', padding: 28 }}>
           <div style={{ fontSize: 36 }}>📭</div>
           <p>Пока нет покупок</p>
@@ -420,16 +513,26 @@ function Cabinet({ name, purchases, goBuy }) {
           <button className="btn btn-primary" onClick={goBuy}>Перейти к покупке</button>
         </div>
       ) : (
-        purchases.map((p) => (
-          <div className="card" key={p.id}>
-            <div className="row" style={{ padding: 0 }}>
-              <div className="ico">📦</div>
-              <div className="meta"><div className="t">{p.software_name}</div><div className="s">{new Date(p.created_at).toLocaleDateString('ru-RU', { timeZone: 'Europe/Moscow' })} · {p.price} ₽</div></div>
+        <>
+          {paid.map((p) => (
+            <div className="card" key={p.id}>
+              <div className="row" style={{ padding: 0 }}>
+                <div className="ico">📦</div>
+                <div className="meta"><div className="t">{p.software_name}</div><div className="s">{new Date(p.created_at).toLocaleDateString('ru-RU', { timeZone: 'Europe/Moscow' })} · {p.amount ?? p.price} ₽</div></div>
+              </div>
+              <div style={{ height: 12 }} />
+              <span className="key">{p.license_key}</span>
             </div>
-            <div style={{ height: 12 }} />
-            <span className="key">{p.license_key}</span>
-          </div>
-        ))
+          ))}
+          {pending.map((p) => (
+            <div className="card" key={p.id}>
+              <div className="row" style={{ padding: 0 }}>
+                <div className="ico">⏳</div>
+                <div className="meta"><div className="t">{p.software_name}</div><div className="s">Ожидает оплаты · {p.amount ?? p.price} ₽</div></div>
+              </div>
+            </div>
+          ))}
+        </>
       )}
 
       <div className="section-label">Документы</div>

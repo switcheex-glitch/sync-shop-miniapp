@@ -37,10 +37,23 @@ export async function POST(req) {
     .eq('user_id', user.id)
     .order('created_at', { ascending: false });
 
+  // Ключ отдаём только для оплаченных покупок; неоплаченные показываем со статусом.
+  const safePurchases = (purchases || []).map((p) => ({
+    id: p.id,
+    software_name: p.software_name,
+    price: p.price,
+    amount: p.amount ?? p.price,
+    payment_method: p.payment_method || null,
+    status: p.status || 'paid',
+    created_at: p.created_at,
+    paid_at: p.paid_at || null,
+    license_key: (p.status || 'paid') === 'paid' ? p.license_key : null
+  }));
+
   return NextResponse.json({
     user: { id: user.id, first_name: user.first_name || '', username: user.username || null },
     guest: user.guest,
     hasConsent: !!consent,
-    purchases: purchases || []
+    purchases: safePurchases
   });
 }
