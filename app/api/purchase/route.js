@@ -83,6 +83,7 @@ export async function POST(req) {
   let tx;
   try {
     tx = await createTransaction({
+      id: purchase.id,
       method,
       amount: PRICE,
       description: `Лицензия ${SOFTWARE_NAME} (пожизненная)`,
