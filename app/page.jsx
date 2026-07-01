@@ -287,6 +287,7 @@ function Home({ name, purchases, goBuy }) {
 
 const PAY_METHODS = [
   { k: 'sbp', g: '🏦', t: 'СБП (QR-код)', s: 'Оплата по QR через банк' },
+  { k: 'card', g: '💳', t: 'Банковская карта', s: 'МИР, Visa, Mastercard' },
   { k: 'crypto', g: '₿', t: 'Криптовалюта', s: 'USDT и другие монеты' }
 ];
 

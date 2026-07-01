@@ -35,10 +35,8 @@ export async function POST(req) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
 
-  const method = body.method === 'crypto' ? 'crypto' : 'sbp';
-  if (!PLATEGA_METHODS[method]) {
-    return NextResponse.json({ error: 'bad_method' }, { status: 400 });
-  }
+  // Поддерживаемые методы: sbp / card / crypto. Неизвестное значение → СБП по умолчанию.
+  const method = PLATEGA_METHODS[body.method] ? body.method : 'sbp';
 
   const supabase = getSupabase();
 
