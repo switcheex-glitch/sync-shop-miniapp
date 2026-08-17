@@ -35,7 +35,8 @@ export async function POST(req) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
 
-  // Поддерживаемые методы: sbp / card / crypto. Неизвестное значение → СБП по умолчанию.
+  // Поддерживаемые методы — ключи из lib/methods.js (sbp / sberpay / card / crypto / intl).
+  // Неизвестное значение → СБП по умолчанию.
   const method = PLATEGA_METHODS[body.method] ? body.method : 'sbp';
 
   const supabase = getSupabase();

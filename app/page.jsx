@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { EULA_TEXT, PRIVACY_TEXT } from '@/lib/legal';
+import { PAY_METHODS, getMethod, payableAmount, fmtAmount } from '@/lib/methods';
 
 const PRICE = 4999;
 const SUPPORT_BOT = process.env.NEXT_PUBLIC_SUPPORT_BOT || 'Sync_Industries_Support_Bot';
@@ -285,12 +286,6 @@ function Home({ name, purchases, goBuy }) {
   );
 }
 
-const PAY_METHODS = [
-  { k: 'sbp', g: '🏦', t: 'СБП (QR-код)', s: 'Оплата по QR через банк' },
-  { k: 'card', g: '💳', t: 'Банковская карта', s: 'МИР, Visa, Mastercard' },
-  { k: 'crypto', g: '₿', t: 'Криптовалюта', s: 'USDT и другие монеты' }
-];
-
 function Buy({ auth, onPurchased }) {
   const [phase, setPhase] = useState('select'); // select | waiting | done
   const [method, setMethod] = useState('sbp');
@@ -415,6 +410,11 @@ function Buy({ auth, onPurchased }) {
   }
 
   // phase === 'select'
+  // Комиссия шлюза отнесена на покупателя, поэтому на платёжной форме
+  // спишется цена + надбавка выбранного метода (см. lib/methods.js).
+  const sel = getMethod(method);
+  const total = payableAmount(method, PRICE);
+
   return (
     <div className="fade">
       <h1 style={{ marginTop: 6 }}>Оформление 🛒</h1>
@@ -438,13 +438,22 @@ function Buy({ auth, onPurchased }) {
       <div className="section-label">Способ оплаты</div>
       <div className="card tight">
         {PAY_METHODS.map((m) => (
-          <div key={m.k} className={`row ${method === m.k ? 'on' : ''}`} onClick={() => setMethod(m.k)}>
-            <div className="ico">{m.g}</div>
-            <div className="meta"><div className="t">{m.t}</div><div className="s">{m.s}</div></div>
-            <div className="box" style={{ borderRadius: '50%' }}>{method === m.k ? '✓' : ''}</div>
+          <div key={m.key} className={`row ${method === m.key ? 'on' : ''}`} onClick={() => setMethod(m.key)}>
+            <div className="ico">{m.icon}</div>
+            <div className="meta">
+              <div className="t">{m.title}</div>
+              <div className="s" style={m.wrap ? { whiteSpace: 'normal' } : undefined}>{m.sub}</div>
+            </div>
+            <div className="box" style={{ borderRadius: '50%' }}>{method === m.key ? '✓' : ''}</div>
           </div>
         ))}
       </div>
+      {/* Строка с итогом нужна только там, где шлюз добавляет комиссию к цене. */}
+      {sel && sel.feePct > 0 && (
+        <p className="hint">
+          К списанию {fmtAmount(total)} ₽ — цена {fmtAmount(PRICE)} ₽ + комиссия платёжной системы {sel.feePct}%
+        </p>
+      )}
 
       <div className="section-label">Условия покупки</div>
       <div className="card glow">
