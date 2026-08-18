@@ -2,7 +2,10 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { EULA_TEXT, PRIVACY_TEXT } from '@/lib/legal';
+import { PAY_FAQ } from '@/lib/payFaq';
+import { Icon, Wave, LogoMark, Reactor } from '@/lib/icons';
 import { PAY_METHODS, getMethod, payableAmount, fmtAmount } from '@/lib/methods';
+import { useReveal, useParallax, useCountUp, useToast, haptic, copyText } from '@/lib/motion';
 
 const PRICE = 4999;
 const SUPPORT_BOT = process.env.NEXT_PUBLIC_SUPPORT_BOT || 'Sync_Industries_Support_Bot';
@@ -17,6 +20,12 @@ function openExternal(url) {
   const tg = getTG();
   if (tg?.openLink) tg.openLink(full);
   else if (typeof window !== 'undefined') window.open(full, '_blank');
+}
+
+function openTelegram(url) {
+  const tg = getTG();
+  if (tg?.openTelegramLink) tg.openTelegramLink(url);
+  else if (typeof window !== 'undefined') window.open(url, '_blank');
 }
 
 // Постоянный гостевой id для открытия вне Telegram (по прямой ссылке Vercel).
@@ -46,6 +55,7 @@ async function api(path, auth, extra = {}) {
   return data;
 }
 
+/* ===================== ВХОД ===================== */
 export default function Page() {
   const [status, setStatus] = useState('loading');
   const [errorMsg, setErrorMsg] = useState('');
@@ -75,8 +85,8 @@ export default function Page() {
         try {
           tg.ready();
           tg.expand();
-          tg.setHeaderColor('#08080a');
-          tg.setBackgroundColor('#08080a');
+          tg.setHeaderColor('#0a0a0b');
+          tg.setBackgroundColor('#0a0a0b');
         } catch (_) {}
         if (tg.initData) {
           startWith({ initData: tg.initData });
@@ -96,203 +106,324 @@ export default function Page() {
   }, [startWith]);
 
   if (status === 'loading') {
-    return <div className="screen"><div className="center"><div className="spinner" /><p className="hint">Загрузка…</p></div></div>;
+    return (
+      <div className="app">
+        <div className="masthead">
+          <div className="top">
+            <div className="brand"><span className="logo"><LogoMark size={20} /></span> Sync Industries</div>
+            <div className="avatar" />
+          </div>
+          <div className="rail"><span className="ind" /></div>
+        </div>
+        <div className="skeleton" style={{ height: '46vh', marginTop: 34 }} />
+        <div className="skeleton" style={{ height: 84, marginTop: 14 }} />
+      </div>
+    );
   }
 
   if (status === 'error') {
     return (
-      <div className="screen"><div className="center">
-        <div style={{ fontSize: 40 }}>⚠️</div>
-        <h2>Ошибка</h2>
-        <p className="hint">{errorMsg === 'unauthorized' ? 'Не удалось открыть магазин. Попробуйте перезагрузить.' : errorMsg}</p>
-        <button className="btn btn-primary" style={{ maxWidth: 220 }} onClick={() => location.reload()}>Перезагрузить</button>
+      <div className="app"><div className="center fade">
+        <div style={{ color: 'var(--ember)', display: 'flex', justifyContent: 'center', marginBottom: 14 }}><Icon name="alert" size={32} /></div>
+        <div className="title">Витрина закрыта</div>
+        <p className="hint" style={{ marginTop: 12 }}>{errorMsg === 'unauthorized' ? 'Не удалось проверить сессию. Обновите страницу — обычно помогает.' : errorMsg}</p>
+        <div style={{ height: 16 }} />
+        <button className="btn btn-primary" style={{ maxWidth: 220, margin: '0 auto' }} onClick={() => location.reload()}>Обновить</button>
       </div></div>
     );
   }
 
-  if (!session.hasConsent) {
-    return <Onboarding auth={auth} onAccepted={() => loadSession(auth)} />;
-  }
-
-  return <Shop auth={auth} session={session} reload={() => loadSession(auth)} />;
+  // Витрина открыта без барьера: согласие с документами принимается
+  // на шаге «Условия» маршрута покупки — там, где оно юридически и нужно.
+  return <Store auth={auth} session={session} reload={() => loadSession(auth)} />;
 }
 
-/* ===================== ОНБОРДИНГ + СОГЛАСИЕ ===================== */
-function Onboarding({ auth, onAccepted }) {
-  const [step, setStep] = useState('welcome'); // welcome | consent
-  const [doc, setDoc] = useState(null); // null | 'eula' | 'privacy'
-  const [eula, setEula] = useState(false);
-  const [privacy, setPrivacy] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [err, setErr] = useState('');
+/* ===================== МАГАЗИН ===================== */
+const TABS = [
+  { k: 'cover', t: 'Обзор' },
+  { k: 'buy', t: 'Купить' },
+  { k: 'keys', t: 'Ключи' },
+  { k: 'help', t: 'Помощь' }
+];
 
-  const accept = async () => {
-    setSubmitting(true); setErr('');
-    try {
-      await api('/api/consent', auth, { acceptedEula: eula, acceptedPrivacy: privacy });
-      getTG()?.HapticFeedback?.notificationOccurred?.('success');
-      onAccepted();
-    } catch (e) { setErr('Не удалось сохранить согласие. Попробуйте ещё раз.'); setSubmitting(false); }
-  };
+function Store({ auth, session, reload }) {
+  const [tab, setTab] = useState('cover');
+  const [toast, showToast] = useToast();
+  const idx = Math.max(0, TABS.findIndex((t) => t.k === tab));
 
-  if (doc) {
-    return (
-      <div className="screen fade">
-        <div className="doc-head">
-          <button className="icon-btn" onClick={() => setDoc(null)}>‹</button>
-          <h3>{doc === 'eula' ? 'Пользовательское соглашение' : 'Политика конфиденциальности'}</h3>
-        </div>
-        <div className="doc">{doc === 'eula' ? EULA_TEXT : PRIVACY_TEXT}</div>
-        <button className="btn btn-ghost" onClick={() => openExternal(PDF_URL)}>📑 Открыть оригинал (PDF)</button>
-        <div style={{ height: 8 }} />
-        <button className="btn btn-primary" onClick={() => setDoc(null)}>Понятно</button>
-      </div>
-    );
-  }
+  const go = (k) => { haptic(); setTab(k); window.scrollTo({ top: 0, behavior: 'smooth' }); };
 
-  if (step === 'welcome') {
-    return (
-      <div className="screen fade" style={{ display: 'flex', flexDirection: 'column', paddingBottom: 24 }}>
-        <div className="hero">
-          <div className="brand"><span className="logo">◆</span> Sync Industries</div>
-          <div className="hero-grow" />
-          <h1>Твой ПК 💻<br /><span className="accent">слушает тебя</span> 🎙️</h1>
-          <p className="sub">Голосовой ассистент <b>Jarvis</b> открывает приложения, пишет код, ищет в сети и автоматизирует рутину — одной фразой.</p>
-        </div>
-        <div style={{ flex: 1, minHeight: 18 }} />
-        <button className="btn btn-primary" onClick={() => setStep('consent')}>Начать</button>
-      </div>
-    );
-  }
-
-  // step === 'consent'
   return (
-    <div className="screen fade">
-      <div className="brand" style={{ marginBottom: 18 }}><span className="logo">◆</span> Sync Industries</div>
-      <h1>Прежде чем<br /><span className="accent">продолжить</span> 📄</h1>
-      <p className="hint" style={{ marginTop: 12 }}>Ознакомьтесь и примите наши документы. Без этого доступ в магазин закрыт.</p>
-
-      <div className="card tight" style={{ marginTop: 18 }}>
-        <div className="row" onClick={() => setDoc('eula')}>
-          <div className="ico">📄</div>
-          <div className="meta"><div className="t">Пользовательское соглашение</div><div className="s">Лицензия, оплата, возвраты (EULA)</div></div>
-          <div className="chev">›</div>
+    <div className="app">
+      <div className="masthead">
+        <div className="top">
+          <div className="brand"><span className="logo"><LogoMark size={20} /></span> Sync Industries</div>
+          <div className="avatar"><Icon name="user" size={15} /></div>
         </div>
-        <div className="row" onClick={() => setDoc('privacy')}>
-          <div className="ico">🔐</div>
-          <div className="meta"><div className="t">Политика конфиденциальности</div><div className="s">Как обрабатываются данные</div></div>
-          <div className="chev">›</div>
-        </div>
+        <nav className="rail">
+          <span className="ind" style={{ '--i': idx }} />
+          {TABS.map((t) => (
+            <div key={t.k} className={`seg ${tab === t.k ? 'active' : ''}`} onClick={() => go(t.k)}>{t.t}</div>
+          ))}
+        </nav>
       </div>
 
-      <div className={`check ${eula ? 'on' : ''}`} onClick={() => setEula(!eula)}>
-        <div className="box">{eula ? '✓' : ''}</div>
-        <span className="txt">Я прочитал(а) и принимаю <b>Пользовательское соглашение</b></span>
-      </div>
-      <div className={`check ${privacy ? 'on' : ''}`} onClick={() => setPrivacy(!privacy)}>
-        <div className="box">{privacy ? '✓' : ''}</div>
-        <span className="txt">Я прочитал(а) и принимаю <b>Политику конфиденциальности</b></span>
+      <div className="swap" key={tab}>
+        {tab === 'cover' && <Cover purchases={session.purchases} goBuy={() => go('buy')} />}
+        {tab === 'buy' && <Buy auth={auth} hasConsent={session.hasConsent} onPurchased={reload} showToast={showToast} goKeys={() => go('keys')} />}
+        {tab === 'keys' && <Keys purchases={session.purchases} goBuy={() => go('buy')} showToast={showToast} />}
+        {tab === 'help' && <Help />}
       </div>
 
-      {err && <p className="hint" style={{ color: 'var(--danger)' }}>{err}</p>}
-
-      <div style={{ height: 8 }} />
-      <button className="btn btn-primary" disabled={!eula || !privacy || submitting} onClick={accept}>
-        {submitting ? 'Сохраняем…' : 'Принять и продолжить'}
-      </button>
+      {toast && <div className="toast" key={toast.id}><span className="g"><Icon name="check" size={15} /></span>{toast.text}</div>}
     </div>
   );
 }
 
-/* ===================== ВИТРИНА ===================== */
-function Shop({ auth, session, reload }) {
-  const [tab, setTab] = useState('home');
-  const name = session.user.first_name || 'друг';
-  const initial = (name[0] || 'S').toUpperCase();
+/* ===================== ОБЗОР ===================== */
+const FEATURES = [
+  { g: 'mic', t: 'Голосовое управление', s: 'Команды на естественном языке, без заученных фраз' },
+  { g: 'bolt', t: 'Автоматизация рутины', s: 'Сценарии и макросы для повторяющихся задач' },
+  { g: 'chip', t: 'Гибридный ИИ', s: 'Распознавание речи работает локально, без записи на серверы' },
+  { g: 'tools', t: 'Утилиты Windows', s: 'Очистка и оптимизация системы в комплекте' }
+];
 
-  return (
-    <div className="screen fade">
-      <div className="topbar">
-        <div className="brand"><span className="logo">◆</span> Sync Industries</div>
-        <div className="avatar">{initial}</div>
-      </div>
+// Сверено с реальным билдом Jarvis 1.5.0 (Electron 30 → только Windows 10+,
+// установленная программа ~1,2 ГБ, облачные ИИ-модели требуют интернет).
+const SPECS = [
+  { k: 'Система', v: 'Windows 10 / 11 · x64' },
+  { k: 'Процессор', v: '2 ядра · от 2 ГГц' },
+  { k: 'Память', v: 'от 4 ГБ' },
+  { k: 'Диск', v: '1,5 ГБ свободного места' },
+  { k: 'Оборудование', v: 'Микрофон' },
+  { k: 'Подключение', v: 'Интернет' }
+];
 
-      {tab === 'home' && <Home name={name} purchases={session.purchases} goBuy={() => setTab('buy')} />}
-      {tab === 'buy' && <Buy auth={auth} onPurchased={reload} />}
-      {tab === 'cabinet' && <Cabinet name={name} purchases={session.purchases} goBuy={() => setTab('buy')} />}
-      {tab === 'support' && <Support />}
+const PACK = [
+  { t: 'Полная версия Jarvis', s: 'Пожизненный доступ, без подписки и продлений' },
+  { t: 'Премиальные утилиты', s: 'Набор инструментов для Windows в подарок' },
+  { t: 'Обновления и поддержка', s: 'Новые версии и помощь без доплат' }
+];
 
-      <nav className="nav">
-        {[
-          { k: 'home', g: '🏠', t: 'Главная' },
-          { k: 'buy', g: '🛒', t: 'Купить' },
-          { k: 'cabinet', g: '🗝️', t: 'Кабинет' },
-          { k: 'support', g: '💬', t: 'Помощь' }
-        ].map((n) => (
-          <div key={n.k} className={`n ${tab === n.k ? 'active' : ''}`} onClick={() => setTab(n.k)}>
-            <span className="g">{n.g}</span>{n.t}
-          </div>
-        ))}
-      </nav>
-    </div>
-  );
-}
+// Путь покупателя от оплаты до работающей программы — закрывает вопрос
+// «а что будет после того, как я заплачу?»
+const FLOW = [
+  { t: 'Выбираете способ оплаты', s: 'СБП, SberPay, карта РФ, зарубежная карта или криптовалюта' },
+  { t: 'Оплачиваете на защищённой форме', s: 'Платёж идёт через шлюз Platega, обычно занимает минуту' },
+  { t: 'Ключ выдаётся автоматически', s: 'Появляется в разделе «Ключи» и дублируется ботом в чат' },
+  { t: 'Скачиваете и активируете', s: 'Дистрибутив — в нашем канале, ключ вводится при первом запуске' }
+];
 
-function Home({ name, purchases, goBuy }) {
+function Cover({ purchases, goBuy }) {
+  const root = useReveal();
+  const rings = useParallax(0.05);
+  const price = useCountUp(PRICE);
   const owned = purchases && purchases.some((p) => p.status === 'paid');
+
+  return (
+    <div ref={root}>
+      <section className="cover">
+        <div className="reactor" ref={rings}><Reactor /></div>
+        <div className="shards"><i /><i /><i /></div>
+
+        <div className="kicker"><span className="dot" /><span className="mono">Издание 2026 · Пожизненная лицензия</span></div>
+        <Wave bars={11} />
+        <h1 className="hero-type" style={{ marginTop: 18 }}>Jarvis<span className="em">Voice</span></h1>
+        <p className="lead">Голосовое управление компьютером и премиальные утилиты для Windows.</p>
+
+        <div className="facts">
+          <div><div className="n">01</div><div className="l">Голос вместо мыши</div></div>
+          <div><div className="n">02</div><div className="l">Работает локально</div></div>
+          <div><div className="n">03</div><div className="l">Ключ за минуту</div></div>
+        </div>
+
+        <div className="scroll-cue">
+          <span className="mono">Листайте вниз</span><span className="line" />
+          <span style={{ display: 'flex', transform: 'rotate(90deg)' }}><Icon name="chevron" size={15} /></span>
+        </div>
+      </section>
+
+      <section className="chapter reveal">
+        <div className="head">
+          <span className="num">01</span>
+          <span className="name">Возможности</span>
+          <span className="aside">{FEATURES.length} блока</span>
+        </div>
+        <div className="gallery">
+          {FEATURES.map((f, i) => (
+            <article className="gcard" key={f.t}>
+              <span className="g"><Icon name={f.g} size={26} /></span>
+              <span className="idx">{String(i + 1).padStart(2, '0')}</span>
+              <div>
+                <div className="t">{f.t}</div>
+                <div className="s">{f.s}</div>
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="chapter reveal">
+        <div className="head">
+          <span className="num">02</span>
+          <span className="name">Как это работает</span>
+          <span className="aside">≈ 2 минуты</span>
+        </div>
+        <ul className="pack">
+          {FLOW.map((p, i) => (
+            <li key={p.t}>
+              <span className="g mono" style={{ color: 'var(--acc)' }}>{String(i + 1).padStart(2, '0')}</span>
+              <div>
+                <div className="t">{p.t}</div>
+                <div className="s">{p.s}</div>
+              </div>
+            </li>
+          ))}
+        </ul>
+        <div className="list" style={{ borderTop: 0, marginTop: 0 }}>
+          <div className="row" onClick={() => { haptic(); openTelegram('https://t.me/Sync_Industries'); }}>
+            <span className="g"><Icon name="box" size={19} /></span>
+            <div className="meta"><div className="t">Скачать дистрибутив</div><div className="s">Канал @Sync_Industries — актуальная версия в закрепе</div></div>
+            <span className="chev"><Icon name="external" size={16} /></span>
+          </div>
+        </div>
+      </section>
+
+      <section className="chapter reveal">
+        <div className="head">
+          <span className="num">03</span>
+          <span className="name">Что входит</span>
+        </div>
+        <ul className="pack">
+          {PACK.map((p) => (
+            <li key={p.t}>
+              <span className="g"><Icon name="check" size={17} /></span>
+              <div>
+                <div className="t">{p.t}</div>
+                <div className="s">{p.s}</div>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <section className="chapter reveal">
+        <div className="head">
+          <span className="num">04</span>
+          <span className="name">Технические данные</span>
+        </div>
+        <div style={{ marginTop: 6 }}>
+          {SPECS.map((s, i) => (
+            <div className="specrow" key={s.k}>
+              <span className="n">{String(i + 1).padStart(2, '0')}</span>
+              <span className="k">{s.k}</span>
+              <span className="v">{s.v}</span>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <div className="actionbar">
+        <div className="sum">
+          <div className="l">Единоразово, без подписки</div>
+          <div className="v">{price.toLocaleString('ru-RU')} ₽</div>
+        </div>
+        <button className="btn btn-primary" onClick={goBuy}>{owned ? 'Купить в подарок' : 'Купить'}</button>
+      </div>
+    </div>
+  );
+}
+
+/* ===================== ДОКУМЕНТЫ И FAQ ===================== */
+function PayFaq() {
+  const [open, setOpen] = useState(PAY_FAQ.blocks[0].key);
+  return (
+    <>
+      <p className="hint">{PAY_FAQ.intro}</p>
+      <div style={{ borderTop: '1px solid var(--edge)', marginTop: 14 }}>
+        {PAY_FAQ.blocks.map((b) => {
+          const on = open === b.key;
+          return (
+            <div className={`faq ${on ? 'on' : ''}`} key={b.key}>
+              <div className="head" onClick={() => { haptic(); setOpen(on ? null : b.key); }}>
+                <span className="g"><Icon name={b.icon} size={19} /></span>
+                <div className="meta">
+                  <div className="t">{b.title}</div>
+                  <span className="tag">{b.tag}</span>
+                </div>
+                <span className="sign"><Icon name={on ? 'minus' : 'plus'} size={16} /></span>
+              </div>
+              {on && (
+                <div className="body">
+                  <ul className="feat">
+                    {b.steps.map((s, i) => <li key={i}><span className="b">•</span><span>{s}</span></li>)}
+                  </ul>
+                  {(b.warns || []).map((w, i) => (
+                    <div className="note" key={i}><span className="g"><Icon name="alert" size={16} /></span><span>{w}</span></div>
+                  ))}
+                  {(b.groups || []).map((g, i) => (
+                    <div key={i}>
+                      <div className="faq-sub">{g.title}</div>
+                      <div className="chips">
+                        {g.items.map((it, j) => <span className={`chip ${g.kind}`} key={j}>{g.kind === 'ok' ? '✓' : '✕'} {it}</span>)}
+                      </div>
+                    </div>
+                  ))}
+                  {(b.issues || []).length > 0 && <div className="faq-sub">Если платёж не проходит</div>}
+                  {(b.issues || []).map((q, i) => (
+                    <div className="qa" key={i}><div className="q">{q.q}</div><div className="a">{q.a}</div></div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <p className="hint" style={{ marginTop: 18 }}>{PAY_FAQ.footer}</p>
+    </>
+  );
+}
+
+const DOCS = {
+  eula: { title: 'Публичная оферта', text: EULA_TEXT, pdf: true },
+  privacy: { title: 'Политика конфиденциальности', text: PRIVACY_TEXT, pdf: true },
+  payfaq: { title: 'Как оплатить', faq: true }
+};
+
+function DocView({ id, onBack, backLabel = 'Назад' }) {
+  const d = DOCS[id];
+  if (!d) return null;
   return (
     <div className="fade">
-      <h1 style={{ marginTop: 6 }}>Привет, {name} 👋</h1>
-      <p className="hint">Управляй своим ПК голосом с ассистентом Jarvis.</p>
-
-      <div className="hero" style={{ minHeight: '34vh', marginTop: 16 }}>
-        <span className="badge">Хит продаж</span>
-        <div className="hero-grow" />
-        <h1 style={{ fontSize: 30 }}>Jarvis 🎙️<br /><span className="accent">Voice Assistant</span></h1>
-        <p className="sub">Пожизненная лицензия + премиальные утилиты для Windows.</p>
+      <div className="doc-head">
+        <button className="icon-btn" onClick={() => { haptic(); onBack(); }}><Icon name="back" size={17} /></button>
+        <span className="mono">{d.title}</span>
       </div>
-
-      <div className="card" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div className="price">{PRICE.toLocaleString('ru-RU')} ₽ <small>разово</small></div>
-        <button className="btn btn-primary" style={{ width: 'auto', padding: '12px 22px' }} onClick={goBuy}>
-          {owned ? 'Купить ещё' : 'Купить'}
-        </button>
-      </div>
-
-      <div className="section-label">Возможности</div>
-      <div className="card tight">
-        {[
-          { g: '🎙️', t: 'Голосовое управление', s: 'Команды на естественном языке' },
-          { g: '⚡', t: 'Автоматизация рутины', s: 'Сценарии и макросы' },
-          { g: '🧠', t: 'Локальный ИИ', s: 'Zero-Cloud, данные на вашем ПК' },
-          { g: '🧰', t: 'Утилиты для Windows', s: 'Очистка и оптимизация в комплекте' }
-        ].map((f) => (
-          <div className="row" key={f.t}>
-            <div className="ico">{f.g}</div>
-            <div className="meta"><div className="t">{f.t}</div><div className="s">{f.s}</div></div>
-          </div>
-        ))}
-      </div>
-
-      <div className="section-label">Системные требования</div>
-      <div className="card">
-        <ul className="feat">
-          <li><span className="b">•</span> Windows 7 / 8 / 10 / 11 (x64)</li>
-          <li><span className="b">•</span> ЦП от 1.8 ГГц, ОЗУ от 2 ГБ</li>
-          <li><span className="b">•</span> 500 МБ на диске, микрофон</li>
-        </ul>
-      </div>
+      {d.faq ? <PayFaq /> : <div className="doc">{d.text}</div>}
+      {d.pdf && (
+        <>
+          <button className="btn btn-ghost" onClick={() => openExternal(PDF_URL)}>Открыть оригинал (PDF)</button>
+          <div style={{ height: 10 }} />
+        </>
+      )}
+      <button className="btn btn-primary" onClick={onBack}>{backLabel}</button>
+      <div style={{ height: 20 }} />
     </div>
   );
 }
 
-function Buy({ auth, onPurchased }) {
+/* ===================== ПОКУПКА: МАРШРУТ ИЗ ТРЁХ ШАГОВ ===================== */
+function Buy({ auth, hasConsent, onPurchased, showToast, goKeys }) {
+  const [step, setStep] = useState(1); // 1 способ · 2 условия · 3 оплата
   const [phase, setPhase] = useState('select'); // select | waiting | done
   const [method, setMethod] = useState('sbp');
   const [buying, setBuying] = useState(false);
   const [err, setErr] = useState('');
   const [agreed, setAgreed] = useState(false);
-  const [doc, setDoc] = useState(null); // null | 'eula' | 'privacy'
+  // согласие пишется в БД один раз — на переходе «Условия» → «Подтверждение»
+  const [consented, setConsented] = useState(!!hasConsent);
+  const [saving, setSaving] = useState(false);
+  const [doc, setDoc] = useState(null);
 
   const [purchaseId, setPurchaseId] = useState(null);
   const [redirect, setRedirect] = useState(null);
@@ -300,28 +431,27 @@ function Buy({ auth, onPurchased }) {
   const [checking, setChecking] = useState(false);
 
   const pollRef = useRef(null);
+  const root = useReveal([step, phase, doc]);
 
-  // Один опрос статуса оплаты. Возвращает true, если оплата подтверждена.
   const checkOnce = useCallback(async (pid) => {
     try {
       const data = await api('/api/payment-status', auth, { purchaseId: pid });
       if (data.status === 'paid') {
         setLicenseKey(data.license_key);
         setPhase('done');
-        getTG()?.HapticFeedback?.notificationOccurred?.('success');
+        haptic('success');
         onPurchased();
         return true;
       }
       if (data.status === 'canceled' || data.status === 'chargeback') {
         setErr('Платёж отменён. Попробуйте ещё раз.');
-        setPhase('select');
-        return true; // останавливаем опрос
+        setPhase('select'); setStep(1);
+        return true;
       }
     } catch (_) {}
     return false;
   }, [auth, onPurchased]);
 
-  // Авто-опрос статуса, пока ждём оплату (каждые 3 c, до ~5 минут).
   useEffect(() => {
     if (phase !== 'waiting' || !purchaseId) return;
     let attempts = 0;
@@ -335,7 +465,7 @@ function Buy({ auth, onPurchased }) {
 
   const pay = async () => {
     if (!agreed) return;
-    setBuying(true); setErr('');
+    setBuying(true); setErr(''); haptic('medium');
     try {
       const data = await api('/api/purchase', auth, { method });
       if (!data.redirect) throw new Error('no_redirect');
@@ -345,6 +475,7 @@ function Buy({ auth, onPurchased }) {
       openExternal(data.redirect);
     } catch (e) {
       setErr('Не удалось создать платёж. Попробуйте позже.');
+      haptic('error');
     } finally {
       setBuying(false);
     }
@@ -355,34 +486,38 @@ function Buy({ auth, onPurchased }) {
     setChecking(true);
     const done = await checkOnce(purchaseId);
     setChecking(false);
-    if (!done) getTG()?.HapticFeedback?.notificationOccurred?.('warning');
+    if (!done) haptic('warning');
   };
 
-  if (doc) {
-    return (
-      <div className="fade">
-        <div className="doc-head">
-          <button className="icon-btn" onClick={() => setDoc(null)}>‹</button>
-          <h3>{doc === 'eula' ? 'Публичная оферта (EULA)' : 'Политика конфиденциальности'}</h3>
-        </div>
-        <div className="doc">{doc === 'eula' ? EULA_TEXT : PRIVACY_TEXT}</div>
-        <button className="btn btn-ghost" onClick={() => openExternal(PDF_URL)}>📑 Открыть оригинал (PDF)</button>
-        <div style={{ height: 8 }} />
-        <button className="btn btn-primary" onClick={() => setDoc(null)}>Назад к покупке</button>
-      </div>
-    );
-  }
+  if (doc) return <DocView id={doc} onBack={() => setDoc(null)} backLabel="Назад к покупке" />;
 
   if (phase === 'done') {
     return (
-      <div className="fade">
-        <h1 style={{ marginTop: 6 }}>Готово 🎉</h1>
-        <p className="hint">Оплата получена, лицензия на Jarvis активирована.</p>
-        <div className="card glow">
-          <div className="badge">Оплачено</div>
-          <p style={{ marginTop: 12 }}>🔑 Ваш лицензионный ключ:</p>
-          <span className="key">{licenseKey}</span>
-          <p className="hint" style={{ marginTop: 12 }}>Ключ сохранён в разделе «Кабинет». Инструкция по установке — на «Главной».</p>
+      <div className="fade" style={{ paddingTop: 26 }}>
+        <span className="mono em">Оплата получена</span>
+        <h1 className="hero-type" style={{ marginTop: 14 }}>Лицензия<span className="em">активна</span></h1>
+        <div className="credential">
+          <div className="top">
+            <span className="name">Jarvis Voice Assistant</span>
+            <span className="stamp">Активна</span>
+          </div>
+          <div className="key-line">
+            <span className="key">{licenseKey}</span>
+            <button className="icon-btn" aria-label="Скопировать ключ" onClick={async () => {
+              const ok = await copyText(licenseKey);
+              haptic(ok ? 'success' : 'warning');
+              showToast?.(ok ? 'Ключ скопирован' : 'Скопируйте вручную');
+            }}><Icon name="copy" size={16} /></button>
+          </div>
+          <button className="dl" onClick={() => { haptic('medium'); openTelegram('https://t.me/Sync_Industries'); }}>
+            <Icon name="box" size={16} /> Скачать дистрибутив
+          </button>
+          <div className="foot"><span>Пожизненно</span><span>Sync Industries</span></div>
+        </div>
+        <p className="hint">Ключ сохранён в разделе «Ключи». Скачайте программу по кнопке выше — ключ вводится при первом запуске.</p>
+        <div className="actionbar">
+          <div className="sum"><div className="l">Готово</div><div className="v">Ключ выдан</div></div>
+          <button className="btn btn-primary" onClick={goKeys}>Мои ключи</button>
         </div>
       </div>
     );
@@ -390,209 +525,314 @@ function Buy({ auth, onPurchased }) {
 
   if (phase === 'waiting') {
     return (
-      <div className="fade">
-        <h1 style={{ marginTop: 6 }}>Ждём оплату ⏳</h1>
-        <div className="card" style={{ textAlign: 'center', padding: 26 }}>
-          <div className="spinner" style={{ margin: '0 auto 14px' }} />
-          <p>Откройте платёжную форму и завершите оплату.</p>
-          <p className="hint">Как только платёж пройдёт, ключ появится здесь автоматически.</p>
-          <div style={{ height: 14 }} />
-          <button className="btn btn-primary" onClick={() => redirect && openExternal(redirect)}>Открыть оплату</button>
-          <div style={{ height: 8 }} />
-          <button className="btn btn-ghost" disabled={checking} onClick={manualCheck}>
-            {checking ? 'Проверяем…' : 'Я оплатил — проверить'}
-          </button>
+      <div className="fade" style={{ paddingTop: 26 }}>
+        <span className="mono em">Шаг 03 · Оплата</span>
+        <div className="title" style={{ marginTop: 14 }}>Ждём платёж</div>
+        <div className="panel" style={{ textAlign: 'center', padding: 26 }}>
+          <div style={{ display: 'flex', justifyContent: 'center' }}><Wave bars={15} /></div>
+          <p style={{ margin: '18px 0 0', fontSize: 14.5 }}>Завершите оплату в открывшейся форме.</p>
+          <p className="hint">Ключ появится здесь сам, как только платёж пройдёт.</p>
+          <div style={{ height: 16 }} />
+          <button className="btn btn-primary" onClick={() => redirect && openExternal(redirect)}>Открыть форму оплаты</button>
+          <div style={{ height: 9 }} />
+          <button className="btn btn-ghost" disabled={checking} onClick={manualCheck}>{checking ? 'Проверяем…' : 'Я оплатил — проверить'}</button>
         </div>
         {err && <p className="hint" style={{ color: 'var(--danger)' }}>{err}</p>}
-        <button className="btn btn-ghost" onClick={() => { clearInterval(pollRef.current); setPhase('select'); }}>Отмена</button>
+        <button className="btn btn-ghost" onClick={() => { clearInterval(pollRef.current); setPhase('select'); setStep(1); }}>Отменить платёж</button>
+        <div style={{ height: 20 }} />
       </div>
     );
   }
 
-  // phase === 'select'
-  // Комиссия шлюза отнесена на покупателя, поэтому на платёжной форме
-  // спишется цена + надбавка выбранного метода (см. lib/methods.js).
   const sel = getMethod(method);
   const total = payableAmount(method, PRICE);
 
   return (
-    <div className="fade">
-      <h1 style={{ marginTop: 6 }}>Оформление 🛒</h1>
-      <div className="hero" style={{ minHeight: '24vh', marginTop: 14 }}>
-        <div className="brand"><span className="logo">◆</span> Jarvis</div>
-        <div className="hero-grow" />
-        <h2 style={{ margin: 0 }}>Jarvis <span className="accent">Voice Assistant</span></h2>
-        <p className="sub">Пожизненная лицензия</p>
+    <div ref={root} style={{ paddingTop: 26 }}>
+      <span className="mono em">Шаг {String(step).padStart(2, '0')} · {step === 1 ? 'Способ оплаты' : step === 2 ? 'Условия' : 'Подтверждение'}</span>
+      <div className="steps">
+        <i className={step >= 1 ? 'on' : ''} /><i className={step >= 2 ? 'on' : ''} /><i className={step >= 3 ? 'on' : ''} />
       </div>
 
-      <div className="card">
-        <ul className="feat">
-          <li><span className="b">✓</span> Полная версия (пожизненный доступ)</li>
-          <li><span className="b">✓</span> Бонус: премиальные утилиты для Windows</li>
-          <li><span className="b">✓</span> Бесплатные обновления и поддержка 24/7</li>
-        </ul>
-        <div className="divider" />
-        <div className="price">{PRICE.toLocaleString('ru-RU')} ₽ <small>единоразово</small></div>
-      </div>
-
-      <div className="section-label">Способ оплаты</div>
-      <div className="card tight">
-        {PAY_METHODS.map((m) => (
-          <div key={m.key} className={`row ${method === m.key ? 'on' : ''}`} onClick={() => setMethod(m.key)}>
-            <div className="ico">{m.icon}</div>
-            <div className="meta">
-              <div className="t">{m.title}</div>
-              <div className="s" style={m.wrap ? { whiteSpace: 'normal' } : undefined}>{m.sub}</div>
-            </div>
-            <div className="box" style={{ borderRadius: '50%' }}>{method === m.key ? '✓' : ''}</div>
+      {step === 1 && (
+        <>
+          <div className="title">Как платим</div>
+          <div className="tiles">
+            {PAY_METHODS.map((m) => (
+              <button
+                type="button"
+                key={m.key}
+                className={`tile ${m.wrap ? 'wide' : ''} ${method === m.key ? 'on' : ''}`}
+                onClick={() => { haptic(); setMethod(m.key); }}
+              >
+                <div className="head">
+                  <span className="g"><Icon name={m.icon} size={24} /></span>
+                  <span className="mark">{method === m.key ? <Icon name="check" size={11} /> : null}</span>
+                </div>
+                <div className="t">{m.title}</div>
+                <div className="s">{m.sub}</div>
+                {m.feePct > 0 && <span className="fee">+{m.feePct}% комиссия провайдера</span>}
+              </button>
+            ))}
           </div>
-        ))}
-      </div>
-      {/* Строка с итогом нужна только там, где шлюз добавляет комиссию к цене. */}
-      {sel && sel.feePct > 0 && (
-        <p className="hint">
-          К списанию {fmtAmount(total)} ₽ — цена {fmtAmount(PRICE)} ₽ + комиссия платёжной системы {sel.feePct}%
-        </p>
+
+          <div className="list">
+            <div className="row" onClick={() => { haptic(); setDoc('payfaq'); }}>
+              <span className="g"><Icon name="help" size={19} /></span>
+              <div className="meta"><div className="t">Как оплатить</div><div className="s">Инструкции, банки КЗ и БР, решение ошибок</div></div>
+              <span className="chev"><Icon name="chevron" size={16} /></span>
+            </div>
+          </div>
+
+          <div className="note">
+            <span className="g"><Icon name="shield" size={16} /></span>
+            <span>Оплата проходит через защищённый шлюз Platega. Ключ выдаётся автоматически — обычно в течение минуты. Если платёж завис, поддержка выдаст ключ вручную.</span>
+          </div>
+        </>
       )}
 
-      <div className="section-label">Условия покупки</div>
-      <div className="card glow">
-        <p style={{ marginTop: 0 }}>❗ <b>Важно:</b> это покупка цифрового товара. После ввода и активации ключа <b className="accent">возврат средств невозможен</b> (оферта, п. 3).</p>
-        <div className="card tight" style={{ margin: '8px 0' }}>
-          <div className="row" onClick={() => setDoc('eula')}>
-            <div className="ico">📄</div>
-            <div className="meta"><div className="t">Публичная оферта (EULA)</div><div className="s">Лицензия, оплата, возвраты</div></div>
-            <div className="chev">›</div>
+      {step === 2 && (
+        <>
+          <div className="title">Условия</div>
+          <div className="note">
+            <span className="g"><Icon name="alert" size={16} /></span>
+            <span>Это цифровой товар. После активации ключа <b className="accent">возврат средств невозможен</b> — пункт 3 оферты.</span>
           </div>
-          <div className="row" onClick={() => setDoc('privacy')}>
-            <div className="ico">🔐</div>
-            <div className="meta"><div className="t">Политика конфиденциальности</div><div className="s">Обработка данных</div></div>
-            <div className="chev">›</div>
+          <div className="list">
+            <div className="row" onClick={() => { haptic(); setDoc('eula'); }}>
+              <span className="g"><Icon name="file" size={19} /></span>
+              <div className="meta"><div className="t">Публичная оферта</div><div className="s">Лицензия, оплата, возвраты</div></div>
+              <span className="chev"><Icon name="chevron" size={16} /></span>
+            </div>
+            <div className="row" onClick={() => { haptic(); setDoc('privacy'); }}>
+              <span className="g"><Icon name="shield" size={19} /></span>
+              <div className="meta"><div className="t">Политика конфиденциальности</div><div className="s">Обработка данных</div></div>
+              <span className="chev"><Icon name="chevron" size={16} /></span>
+            </div>
+            <div className="row" onClick={() => openExternal(PDF_URL)}>
+              <span className="g"><Icon name="pdf" size={19} /></span>
+              <div className="meta"><div className="t">Пакет документов</div><div className="s">Оригинал в PDF</div></div>
+              <span className="chev"><Icon name="external" size={16} /></span>
+            </div>
           </div>
-          <div className="row" onClick={() => openExternal(PDF_URL)}>
-            <div className="ico">📑</div>
-            <div className="meta"><div className="t">Полный документ (PDF)</div><div className="s">Оригинал пакета документов</div></div>
-            <div className="chev">↗</div>
+          <div className={`check ${agreed ? 'on' : ''}`} onClick={() => { haptic(); setAgreed(!agreed); }}>
+            <div className="box"><Icon name="check" size={13} /></div>
+            <span className="txt">Принимаю оферту и Политику. Понимаю, что после активации ключа возврат невозможен.</span>
           </div>
+        </>
+      )}
+
+      {step === 3 && (
+        <>
+          <div className="title">Проверьте заказ</div>
+          <div className="panel">
+            <div className="specrow" style={{ paddingTop: 0 }}>
+              <span className="n">01</span><span className="k">Товар</span><span className="v">Jarvis Voice Assistant</span>
+            </div>
+            <div className="specrow">
+              <span className="n">02</span><span className="k">Лицензия</span><span className="v">Пожизненная</span>
+            </div>
+            <div className="specrow">
+              <span className="n">03</span><span className="k">Способ</span><span className="v">{sel?.title}</span>
+            </div>
+            <div className="specrow">
+              <span className="n">04</span><span className="k">Цена</span><span className="v">{fmtAmount(PRICE)} ₽</span>
+            </div>
+            <div className="specrow" style={{ borderBottom: 0 }}>
+              <span className="n">05</span><span className="k">Комиссия</span>
+              <span className="v">{sel?.feePct > 0 ? `${sel.feePct}% · ${fmtAmount(total - PRICE)} ₽` : 'нет'}</span>
+            </div>
+          </div>
+          <p className="hint">После нажатия откроется защищённая форма платёжного шлюза. Ключ придёт сюда автоматически.</p>
+          {method === 'intl' && (
+            <p className="hint">Списание пройдёт в евро — ваш банк сам сконвертирует сумму по своему курсу в момент оплаты.</p>
+          )}
+        </>
+      )}
+
+      {err && <p className="hint" style={{ color: 'var(--danger)' }}>{err}</p>}
+
+      <div className="actionbar">
+        <div className="sum">
+          <div className="l">{step === 3 ? 'К списанию' : 'Итого'}</div>
+          <div className="v">{fmtAmount(total)} ₽</div>
         </div>
-        <div className={`check ${agreed ? 'on' : ''}`} onClick={() => setAgreed(!agreed)}>
-          <div className="box">{agreed ? '✓' : ''}</div>
-          <span className="txt">Я ознакомился(ась) с офертой и Политикой и принимаю их. Понимаю, что после активации ключа возврат средств невозможен.</span>
-        </div>
-        {err && <p className="hint" style={{ color: 'var(--danger)' }}>{err}</p>}
-        <div style={{ height: 4 }} />
-        <button className="btn btn-primary" disabled={!agreed || buying} onClick={pay}>
-          {buying ? 'Создаём платёж…' : `Оплатить ${PRICE.toLocaleString('ru-RU')} ₽`}
-        </button>
+        {step < 3 ? (
+          <button
+            className="btn btn-primary"
+            disabled={(step === 2 && !agreed) || saving}
+            onClick={async () => {
+              haptic('medium');
+              if (step === 2 && !consented) {
+                setSaving(true); setErr('');
+                try {
+                  await api('/api/consent', auth, { acceptedEula: true, acceptedPrivacy: true });
+                  setConsented(true);
+                } catch (_) {
+                  setErr('Не удалось сохранить согласие. Проверьте связь и попробуйте ещё раз.');
+                  setSaving(false);
+                  return;
+                }
+                setSaving(false);
+              }
+              setStep(step + 1);
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+          >
+            {step === 2 && !agreed ? 'Примите условия' : saving ? 'Сохраняем…' : 'Далее'}
+          </button>
+        ) : (
+          <button className="btn btn-primary" disabled={buying} onClick={pay}>{buying ? 'Создаём…' : 'Оплатить'}</button>
+        )}
       </div>
+
+      {step > 1 && (
+        <button className="btn btn-ghost" style={{ marginTop: 22 }} onClick={() => { haptic(); setStep(step - 1); }}>Назад</button>
+      )}
+      <div style={{ height: 12 }} />
     </div>
   );
 }
 
-function Cabinet({ name, purchases, goBuy }) {
-  const [doc, setDoc] = useState(null); // null | 'eula' | 'privacy'
+/* ===================== КЛЮЧИ ===================== */
+function Keys({ purchases, goBuy, showToast }) {
+  const [doc, setDoc] = useState(null);
+  const root = useReveal([doc]);
 
-  if (doc) {
-    return (
-      <div className="fade">
-        <div className="doc-head">
-          <button className="icon-btn" onClick={() => setDoc(null)}>‹</button>
-          <h3>{doc === 'eula' ? 'Публичная оферта (EULA)' : 'Политика конфиденциальности'}</h3>
-        </div>
-        <div className="doc">{doc === 'eula' ? EULA_TEXT : PRIVACY_TEXT}</div>
-        <button className="btn btn-ghost" onClick={() => openExternal(PDF_URL)}>📑 Открыть оригинал (PDF)</button>
-        <div style={{ height: 8 }} />
-        <button className="btn btn-primary" onClick={() => setDoc(null)}>Назад</button>
-      </div>
-    );
-  }
+  if (doc) return <DocView id={doc} onBack={() => setDoc(null)} />;
 
   const paid = (purchases || []).filter((p) => p.status === 'paid');
   const pending = (purchases || []).filter((p) => p.status === 'pending');
 
   return (
-    <div className="fade">
-      <h1 style={{ marginTop: 6 }}>Кабинет 🗝️</h1>
-      <p className="hint">Ваши лицензии и ключи активации.</p>
+    <div ref={root} style={{ paddingTop: 26 }}>
+      <span className="mono em">Личные данные</span>
+      <div className="title" style={{ marginTop: 14 }}>Ключи</div>
+
       {paid.length === 0 && pending.length === 0 ? (
-        <div className="card" style={{ textAlign: 'center', padding: 28 }}>
-          <div style={{ fontSize: 36 }}>📭</div>
-          <p>Пока нет покупок</p>
-          <p className="hint">Оформите лицензию на Jarvis за пару секунд.</p>
-          <div style={{ height: 6 }} />
-          <button className="btn btn-primary" onClick={goBuy}>Перейти к покупке</button>
+        <div className="empty reveal">
+          <div style={{ color: 'var(--ember)', display: 'flex', justifyContent: 'center', marginBottom: 12 }}><Icon name="inbox" size={28} /></div>
+          <p style={{ margin: 0, fontSize: 14.5 }}>Здесь появятся ваши ключи</p>
+          <p className="hint">Оформление занимает пару минут.</p>
+          <div style={{ height: 14 }} />
+          <button className="btn btn-primary" style={{ maxWidth: 220, margin: '0 auto' }} onClick={goBuy}>Купить лицензию</button>
         </div>
       ) : (
         <>
           {paid.map((p) => (
-            <div className="card" key={p.id}>
-              <div className="row" style={{ padding: 0 }}>
-                <div className="ico">📦</div>
-                <div className="meta"><div className="t">{p.software_name}</div><div className="s">{new Date(p.created_at).toLocaleDateString('ru-RU', { timeZone: 'Europe/Moscow' })} · {p.amount ?? p.price} ₽</div></div>
+            <div className="credential reveal" key={p.id}>
+              <div className="top">
+                <span className="name">{p.software_name}</span>
+                <span className="stamp">Активна</span>
               </div>
-              <div style={{ height: 12 }} />
-              <span className="key">{p.license_key}</span>
+              <div className="key-line">
+                <span className="key">{p.license_key}</span>
+                <button className="icon-btn" aria-label="Скопировать ключ" onClick={async () => {
+                  const ok = await copyText(p.license_key);
+                  haptic(ok ? 'success' : 'warning');
+                  showToast?.(ok ? 'Ключ скопирован' : 'Скопируйте вручную');
+                }}><Icon name="copy" size={16} /></button>
+              </div>
+              <button className="dl" onClick={() => { haptic('medium'); openTelegram('https://t.me/Sync_Industries'); }}>
+                <Icon name="box" size={16} /> Скачать дистрибутив
+              </button>
+              <div className="foot">
+                <span>{new Date(p.created_at).toLocaleDateString('ru-RU', { timeZone: 'Europe/Moscow' })}</span>
+                <span>{p.amount ?? p.price} ₽</span>
+              </div>
             </div>
           ))}
           {pending.map((p) => (
-            <div className="card" key={p.id}>
-              <div className="row" style={{ padding: 0 }}>
-                <div className="ico">⏳</div>
-                <div className="meta"><div className="t">{p.software_name}</div><div className="s">Ожидает оплаты · {p.amount ?? p.price} ₽</div></div>
+            <div className="credential pend reveal" key={p.id}>
+              <div className="top">
+                <span className="name">{p.software_name}</span>
+                <span className="stamp">Ожидает оплаты</span>
               </div>
+              <div className="key-line"><span className="key" style={{ color: 'var(--ash)' }}>— — — — · — — — — · — — — —</span></div>
+              <div className="foot"><span>Не оплачено</span><span>{p.amount ?? p.price} ₽</span></div>
             </div>
           ))}
         </>
       )}
 
-      <div className="section-label">Документы</div>
-      <div className="card tight">
-        <div className="row" onClick={() => setDoc('eula')}>
-          <div className="ico">📄</div>
-          <div className="meta"><div className="t">Публичная оферта (EULA)</div><div className="s">Лицензия, оплата, возвраты</div></div>
-          <div className="chev">›</div>
+      <section className="chapter reveal">
+        <div className="head"><span className="num">01</span><span className="name">Документы</span></div>
+        <div className="list" style={{ marginTop: 0, borderTop: 0 }}>
+          <div className="row" onClick={() => { haptic(); setDoc('eula'); }}>
+            <span className="g"><Icon name="file" size={19} /></span>
+            <div className="meta"><div className="t">Публичная оферта</div><div className="s">Лицензия, оплата, возвраты</div></div>
+            <span className="chev"><Icon name="chevron" size={16} /></span>
+          </div>
+          <div className="row" onClick={() => { haptic(); setDoc('privacy'); }}>
+            <span className="g"><Icon name="shield" size={19} /></span>
+            <div className="meta"><div className="t">Политика конфиденциальности</div><div className="s">Обработка данных</div></div>
+            <span className="chev"><Icon name="chevron" size={16} /></span>
+          </div>
+          <div className="row" onClick={() => openExternal(PDF_URL)}>
+            <span className="g"><Icon name="pdf" size={19} /></span>
+            <div className="meta"><div className="t">Пакет документов</div><div className="s">Оригинал в PDF</div></div>
+            <span className="chev"><Icon name="external" size={16} /></span>
+          </div>
         </div>
-        <div className="row" onClick={() => setDoc('privacy')}>
-          <div className="ico">🔐</div>
-          <div className="meta"><div className="t">Политика конфиденциальности</div><div className="s">Обработка данных</div></div>
-          <div className="chev">›</div>
-        </div>
-        <div className="row" onClick={() => openExternal(PDF_URL)}>
-          <div className="ico">📑</div>
-          <div className="meta"><div className="t">Полный документ (PDF)</div><div className="s">Оригинал пакета документов</div></div>
-          <div className="chev">↗</div>
-        </div>
-      </div>
+      </section>
+      <div style={{ height: 20 }} />
     </div>
   );
 }
 
-function Support() {
-  const open = () => {
-    const tg = getTG();
-    const url = `https://t.me/${SUPPORT_BOT}`;
-    if (tg?.openTelegramLink) tg.openTelegramLink(url);
-    else window.open(url, '_blank');
-  };
+/* ===================== ПОМОЩЬ ===================== */
+function Help() {
+  const [doc, setDoc] = useState(null);
+  const root = useReveal([doc]);
+
+  if (doc) return <DocView id={doc} onBack={() => setDoc(null)} />;
+
   return (
-    <div className="fade">
-      <h1 style={{ marginTop: 6 }}>Помощь 💬</h1>
-      <p className="hint">Вопросы по установке, активации или работе Jarvis?</p>
-      <div className="card">
-        <div className="row" style={{ padding: 0 }}>
-          <div className="ico">🛟</div>
-          <div className="meta"><div className="t">Техническая поддержка</div><div className="s">Будни 09–21 · Выходные 11–18 МСК</div></div>
-        </div>
-        <div style={{ height: 14 }} />
-        <button className="btn btn-primary" onClick={open}>Написать в поддержку</button>
+    <div ref={root} style={{ paddingTop: 26 }}>
+      <span className="mono em">Сервис</span>
+      <div className="title" style={{ marginTop: 14 }}>Помощь</div>
+      <p className="hint">Оплата, установка, активация — отвечаем в Telegram.</p>
+
+      <div className="tiles reveal">
+        <button type="button" className="tile" onClick={() => { haptic('medium'); openTelegram(`https://t.me/${SUPPORT_BOT}`); }}>
+          <div className="head"><span className="g"><Icon name="life" size={24} /></span><span className="chev"><Icon name="external" size={15} /></span></div>
+          <div className="t">Поддержка</div>
+          <div className="s">Будни 09–21 · Выходные 11–18 МСК</div>
+        </button>
+        <button type="button" className="tile" onClick={() => { haptic(); openTelegram('https://t.me/Sync_Industries'); }}>
+          <div className="head"><span className="g"><Icon name="signal" size={24} /></span><span className="chev"><Icon name="external" size={15} /></span></div>
+          <div className="t">Канал</div>
+          <div className="s">Новости и дистрибутив</div>
+        </button>
       </div>
-      <div className="card">
-        <div className="row" style={{ padding: 0 }} onClick={() => { const tg = getTG(); const u = 'https://t.me/Sync_Industries'; tg?.openTelegramLink ? tg.openTelegramLink(u) : window.open(u, '_blank'); }}>
-          <div className="ico">📣</div>
-          <div className="meta"><div className="t">Канал Sync Industries</div><div className="s">Новости и дистрибутив</div></div>
-          <div className="chev">›</div>
+
+      <section className="chapter reveal">
+        <div className="head"><span className="num">01</span><span className="name">Оплата</span></div>
+        <div className="list" style={{ marginTop: 0, borderTop: 0 }}>
+          <div className="row" onClick={() => { haptic(); setDoc('payfaq'); }}>
+            <span className="g"><Icon name="help" size={19} /></span>
+            <div className="meta"><div className="t">Как оплатить</div><div className="s">Пять способов, банки и решение ошибок</div></div>
+            <span className="chev"><Icon name="chevron" size={16} /></span>
+          </div>
         </div>
-      </div>
+      </section>
+
+      <section className="chapter reveal">
+        <div className="head"><span className="num">02</span><span className="name">Документы</span></div>
+        <div className="list" style={{ marginTop: 0, borderTop: 0 }}>
+          <div className="row" onClick={() => { haptic(); setDoc('eula'); }}>
+            <span className="g"><Icon name="file" size={19} /></span>
+            <div className="meta"><div className="t">Публичная оферта</div><div className="s">Лицензия, оплата, возвраты</div></div>
+            <span className="chev"><Icon name="chevron" size={16} /></span>
+          </div>
+          <div className="row" onClick={() => { haptic(); setDoc('privacy'); }}>
+            <span className="g"><Icon name="shield" size={19} /></span>
+            <div className="meta"><div className="t">Политика конфиденциальности</div><div className="s">Обработка данных</div></div>
+            <span className="chev"><Icon name="chevron" size={16} /></span>
+          </div>
+        </div>
+      </section>
+      <div style={{ height: 20 }} />
     </div>
   );
 }
