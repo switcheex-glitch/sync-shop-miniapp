@@ -41,6 +41,7 @@ export async function POST(req) {
   const result = await confirmPurchase(purchase);
   return NextResponse.json({
     status: result.status,
-    license_key: result.license_key
+    license_key: result.license_key,
+    license_keys: result.license_keys || []
   });
 }

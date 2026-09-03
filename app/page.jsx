@@ -7,7 +7,8 @@ import { Icon, Wave, LogoMark, Reactor } from '@/lib/icons';
 import { PAY_METHODS, getMethod, payableAmount, fmtAmount } from '@/lib/methods';
 import { useReveal, useParallax, useCountUp, useToast, haptic, copyText } from '@/lib/motion';
 
-const PRICE = 4999;
+const PRICE = 7900;
+const MAX_QUANTITY = 20;
 const SUPPORT_BOT = process.env.NEXT_PUBLIC_SUPPORT_BOT || 'Sync_Industries_Support_Bot';
 const PDF_URL = '/legal/Sync_Industries_Jarvis_Legal.pdf';
 
@@ -417,6 +418,7 @@ function Buy({ auth, hasConsent, onPurchased, showToast, goKeys }) {
   const [step, setStep] = useState(1); // 1 способ · 2 условия · 3 оплата
   const [phase, setPhase] = useState('select'); // select | waiting | done
   const [method, setMethod] = useState('sbp');
+  const [quantity, setQuantity] = useState(1);
   const [buying, setBuying] = useState(false);
   const [err, setErr] = useState('');
   const [agreed, setAgreed] = useState(false);
@@ -463,11 +465,16 @@ function Buy({ auth, hasConsent, onPurchased, showToast, goKeys }) {
     return () => clearInterval(pollRef.current);
   }, [phase, purchaseId, checkOnce]);
 
+  const setQty = (n) => {
+    haptic('light');
+    setQuantity(Math.min(MAX_QUANTITY, Math.max(1, n)));
+  };
+
   const pay = async () => {
     if (!agreed) return;
     setBuying(true); setErr(''); haptic('medium');
     try {
-      const data = await api('/api/purchase', auth, { method });
+      const data = await api('/api/purchase', auth, { method, quantity });
       if (!data.redirect) throw new Error('no_redirect');
       setPurchaseId(data.purchaseId);
       setRedirect(data.redirect);
@@ -545,7 +552,9 @@ function Buy({ auth, hasConsent, onPurchased, showToast, goKeys }) {
   }
 
   const sel = getMethod(method);
-  const total = payableAmount(method, PRICE);
+  // Цена за одну лицензию не меняется — умножается количество.
+  const subtotal = PRICE * quantity;
+  const total = payableAmount(method, subtotal);
 
   return (
     <div ref={root} style={{ paddingTop: 26 }}>
@@ -556,6 +565,39 @@ function Buy({ auth, hasConsent, onPurchased, showToast, goKeys }) {
 
       {step === 1 && (
         <>
+          <div className="title">Сколько лицензий</div>
+          <div className="qty">
+            <button
+              type="button"
+              className="qty-btn"
+              onClick={() => setQty(quantity - 1)}
+              disabled={quantity <= 1}
+              aria-label="Меньше"
+            >
+              −
+            </button>
+            <div className="qty-val">
+              <b>{quantity}</b>
+              <span>{quantity === 1 ? 'лицензия' : quantity < 5 ? 'лицензии' : 'лицензий'}</span>
+            </div>
+            <button
+              type="button"
+              className="qty-btn"
+              onClick={() => setQty(quantity + 1)}
+              disabled={quantity >= MAX_QUANTITY}
+              aria-label="Больше"
+            >
+              +
+            </button>
+            <div className="qty-sum">
+              <b>{fmtAmount(PRICE * quantity)} ₽</b>
+              {quantity > 1 && <span>{fmtAmount(PRICE)} ₽ за лицензию</span>}
+            </div>
+          </div>
+          <p className="hint">
+            Один ключ работает на одном компьютере. Все ключи придут сразу после оплаты.
+          </p>
+
           <div className="title">Как платим</div>
           <div className="tiles">
             {PAY_METHODS.map((m) => (
@@ -636,11 +678,11 @@ function Buy({ auth, hasConsent, onPurchased, showToast, goKeys }) {
               <span className="n">03</span><span className="k">Способ</span><span className="v">{sel?.title}</span>
             </div>
             <div className="specrow">
-              <span className="n">04</span><span className="k">Цена</span><span className="v">{fmtAmount(PRICE)} ₽</span>
+              <span className="n">04</span><span className="k">Цена</span><span className="v">{quantity > 1 ? `${fmtAmount(PRICE)} × ${quantity} = ${fmtAmount(subtotal)} ₽` : `${fmtAmount(PRICE)} ₽`}</span>
             </div>
             <div className="specrow" style={{ borderBottom: 0 }}>
               <span className="n">05</span><span className="k">Комиссия</span>
-              <span className="v">{sel?.feePct > 0 ? `${sel.feePct}% · ${fmtAmount(total - PRICE)} ₽` : 'нет'}</span>
+              <span className="v">{sel?.feePct > 0 ? `${sel.feePct}% · ${fmtAmount(total - subtotal)} ₽` : 'нет'}</span>
             </div>
           </div>
           <p className="hint">После нажатия откроется защищённая форма платёжного шлюза. Ключ придёт сюда автоматически.</p>

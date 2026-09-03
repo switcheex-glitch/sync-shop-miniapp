@@ -8,7 +8,9 @@ import { randomInt } from 'crypto';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const PRICE = 4999;
+const PRICE = 7900;
+// Сколько лицензий разрешено взять одной покупкой.
+const MAX_QUANTITY = 20;
 const SOFTWARE_NAME = 'Jarvis Voice Assistant';
 // Куда вернуть пользователя из платёжной формы Platega (обратно в бота-магазин).
 const RETURN_URL = process.env.PLATEGA_RETURN_URL || 'https://t.me/Sync_Industries_Shop_bot';
@@ -44,6 +46,13 @@ export async function POST(req) {
   // Неизвестное значение → СБП по умолчанию.
   const method = PLATEGA_METHODS[body.method] ? body.method : 'sbp';
 
+  // Несколько лицензий одной оплатой. Каждая лицензия — отдельная строка в
+  // purchases: так учёт остаётся «одна строка = одна лицензия», а проверка
+  // ключа в приложении работает без изменений. Связывает их общий
+  // transaction_id, по нему же оплата подтверждается сразу для всех.
+  const quantity = Math.min(MAX_QUANTITY, Math.max(1, Math.floor(Number(body.quantity) || 1)));
+  const total = PRICE * quantity;
+
   const supabase = getSupabase();
 
   // Покупка разрешена только при наличии актуального согласия с документами
@@ -60,28 +69,29 @@ export async function POST(req) {
     return NextResponse.json({ error: 'consent_required' }, { status: 403 });
   }
 
-  // 1) Создаём pending-покупку (ключ генерируется заранее, но раскроется только после оплаты).
-  const licenseKey = generateLicenseKey();
-  const { data: purchase, error } = await supabase
-    .from('purchases')
-    .insert({
-      user_id: user.id,
-      username: user.username || null,
-      first_name: user.first_name || 'Пользователь',
-      software_name: SOFTWARE_NAME,
-      license_key: licenseKey,
-      price: PRICE,
-      amount: PRICE,
-      status: 'pending',
-      provider: 'platega',
-      payment_method: method
-    })
-    .select()
-    .single();
+  // 1) Создаём pending-покупки (ключи генерируются заранее, раскрываются после оплаты).
+  const rows = Array.from({ length: quantity }, () => ({
+    user_id: user.id,
+    username: user.username || null,
+    first_name: user.first_name || 'Пользователь',
+    software_name: SOFTWARE_NAME,
+    license_key: generateLicenseKey(),
+    price: PRICE,
+    amount: PRICE,
+    status: 'pending',
+    provider: 'platega',
+    payment_method: method
+  }));
 
-  if (error) {
-    return NextResponse.json({ error: 'db_error', detail: error.message }, { status: 500 });
+  const { data: purchases, error } = await supabase.from('purchases').insert(rows).select();
+
+  if (error || !purchases || purchases.length === 0) {
+    return NextResponse.json({ error: 'db_error', detail: error?.message }, { status: 500 });
   }
+
+  // Первая покупка представляет заказ: её id уходит в payload платежа.
+  const purchase = purchases[0];
+  const purchaseIds = purchases.map((p) => p.id);
 
   // 2) Создаём транзакцию в Platega (payload = id нашей покупки — вернётся в вебхуке).
   let tx;
@@ -89,8 +99,11 @@ export async function POST(req) {
     tx = await createTransaction({
       id: purchase.id,
       method,
-      amount: PRICE,
-      description: `Лицензия ${SOFTWARE_NAME} (пожизненная)`,
+      amount: total,
+      description:
+        quantity > 1
+          ? `${SOFTWARE_NAME}: ${quantity} лицензии (пожизненные)`
+          : `Лицензия ${SOFTWARE_NAME} (пожизненная)`,
       payload: purchase.id,
       returnUrl: RETURN_URL,
       failedUrl: RETURN_URL,
@@ -100,7 +113,7 @@ export async function POST(req) {
       }
     });
   } catch (e) {
-    await supabase.from('purchases').update({ status: 'error' }).eq('id', purchase.id);
+    await supabase.from('purchases').update({ status: 'error' }).in('id', purchaseIds);
     return NextResponse.json({ error: 'gateway_error' }, { status: 502 });
   }
 
@@ -108,11 +121,13 @@ export async function POST(req) {
   await supabase
     .from('purchases')
     .update({ transaction_id: tx.transactionId || tx.id || null })
-    .eq('id', purchase.id);
+    .in('id', purchaseIds);
 
   return NextResponse.json({
     ok: true,
     purchaseId: purchase.id,
+    quantity,
+    total,
     transactionId: tx.transactionId || tx.id || null,
     redirect: tx.redirect || null,
     status: tx.status || 'PENDING'
