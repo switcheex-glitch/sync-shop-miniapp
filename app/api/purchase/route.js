@@ -3,6 +3,7 @@ import { resolveUser } from '@/lib/resolveUser';
 import { getSupabase } from '@/lib/supabaseServer';
 import { DOC_VERSION } from '@/lib/legal';
 import { createTransaction, PLATEGA_METHODS } from '@/lib/platega';
+import { randomInt } from 'crypto';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -12,11 +13,15 @@ const SOFTWARE_NAME = 'Jarvis Voice Assistant';
 // Куда вернуть пользователя из платёжной формы Platega (обратно в бота-магазин).
 const RETURN_URL = process.env.PLATEGA_RETURN_URL || 'https://t.me/Sync_Industries_Shop_bot';
 
-// Генерация лицензионного ключа JARVIS-XXXX-XXXX-XXXX
+// Генерация лицензионного ключа JARVIS-XXXX-XXXX-XXXX.
+// randomInt, а не Math.random: последовательность Math.random предсказуема по
+// нескольким выданным значениям, а здесь от непредсказуемости зависит платный доступ.
+// Алфавит и формат не меняются — ранее выданные ключи остаются валидными.
+// randomInt берёт равномерное значение без перекоса, который дал бы простой остаток
+// от деления случайного байта на 36.
 function generateLicenseKey() {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-  const block = () =>
-    Array.from({ length: 4 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+  const block = () => Array.from({ length: 4 }, () => chars[randomInt(chars.length)]).join('');
   return `JARVIS-${block()}-${block()}-${block()}`;
 }
 
