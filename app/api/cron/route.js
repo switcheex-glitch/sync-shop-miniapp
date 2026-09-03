@@ -15,7 +15,9 @@ const CRON_SECRET = process.env.CRON_SECRET || '';
 async function handle(req) {
   const url = new URL(req.url);
   const secret = url.searchParams.get('secret') || req.headers.get('x-cron-secret');
-  if (CRON_SECRET && secret !== CRON_SECRET) {
+  // Fail CLOSED. This used to be `if (CRON_SECRET && ...)`, so an unset env var
+  // silently disabled authentication instead of refusing to serve.
+  if (!CRON_SECRET || secret !== CRON_SECRET) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
 

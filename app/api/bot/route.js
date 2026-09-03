@@ -73,9 +73,10 @@ function startKeyboard() {
 
 export async function POST(req) {
   // Проверка секрета вебхука (защита от посторонних вызовов)
-  if (SECRET) {
-    const got = req.headers.get('x-telegram-bot-api-secret-token');
-    if (got !== SECRET) return NextResponse.json({ ok: true });
+  // Fail CLOSED. TELEGRAM_WEBHOOK_SECRET was never set, so this guard never ran
+  // and the endpoint accepted forged Telegram updates from anyone.
+  if (!SECRET || req.headers.get('x-telegram-bot-api-secret-token') !== SECRET) {
+    return NextResponse.json({ ok: true });
   }
 
   let update;

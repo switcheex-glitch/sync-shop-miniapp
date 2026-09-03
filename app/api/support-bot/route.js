@@ -9,7 +9,9 @@ const handle = webhookCallback(supportBot, 'std/http');
 
 // Вебхук бота техподдержки. Защита — секретный заголовок Telegram (secret_token).
 export async function POST(req) {
-  if (SECRET && req.headers.get('x-telegram-bot-api-secret-token') !== SECRET) {
+  // Fail CLOSED: no configured secret means no authentication, so refuse rather
+  // than accept anything that arrives.
+  if (!SECRET || req.headers.get('x-telegram-bot-api-secret-token') !== SECRET) {
     return new Response('ok', { status: 200 });
   }
   return handle(req);

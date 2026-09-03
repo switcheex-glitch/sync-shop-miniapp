@@ -11,9 +11,12 @@ const SECRET = process.env.NOTIFY_WEBHOOK_SECRET || '';
 // Вебхук бота-уведомителя. На /start от владельца запоминает его chat_id в config,
 // чтобы вебхук Platega знал, куда слать уведомления об оплате.
 export async function POST(req) {
-  if (SECRET) {
-    const got = req.headers.get('x-telegram-bot-api-secret-token');
-    if (got !== SECRET) return NextResponse.json({ ok: true });
+  // Fail CLOSED. NOTIFY_WEBHOOK_SECRET was never set, so this guard never ran.
+  // That was the worst hole in the shop: a forged /start claiming the owner's
+  // username rebinds setOwnerChatId, and payment notifications carry the buyer's
+  // licence key — so anyone able to POST here could have collected every key sold.
+  if (!SECRET || req.headers.get('x-telegram-bot-api-secret-token') !== SECRET) {
+    return NextResponse.json({ ok: true });
   }
 
   let update;
